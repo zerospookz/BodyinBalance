@@ -44,6 +44,50 @@
     try { return (await Notification.requestPermission()) === "granted"; }
     catch { return false; }
   }
+  
+  async function loadXlsxLib() {
+    // Dynamically load XLSX if CDN didn't load (common on some networks)
+    if (typeof XLSX !== "undefined") return true;
+    return await new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+      s.onload = () => resolve(typeof XLSX !== "undefined");
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+  }
+
+  function normalizeHeader(h) {
+    const x = String(h || "").trim().toLowerCase();
+    // English
+    if (["program","programme","plan","template"].includes(x)) return "Program";
+    if (["day","weekday"].includes(x)) return "Day";
+    if (["exercise","movement","ex"].includes(x)) return "Exercise";
+    if (["sets","set"].includes(x)) return "Sets";
+    if (["reps","rep","repetitions"].includes(x)) return "Reps";
+    if (["rest","pause","break"].includes(x)) return "Rest";
+    if (["note","notes","comment","comments"].includes(x)) return "Note";
+    // Bulgarian
+    if (["програма","програми","режим"].includes(x)) return "Program";
+    if (["ден","дни","седмица","ден от седмицата"].includes(x)) return "Day";
+    if (["упражнение","упражнения"].includes(x)) return "Exercise";
+    if (["серии","серия"].includes(x)) return "Sets";
+    if (["повторения","повторение","репс"].includes(x)) return "Reps";
+    if (["почивка","пауза","рест"].includes(x)) return "Rest";
+    if (["бележка","бележки","коментар"].includes(x)) return "Note";
+    return "";
+  }
+
+  function mapRowKeys(row) {
+    const out = {};
+    for (const [k,v] of Object.entries(row || {})) {
+      const nk = normalizeHeader(k);
+      if (nk) out[nk] = v;
+      else out[k] = v;
+    }
+    return out;
+  }
+
   function showDesktopNotification(title, body) {
     if (!("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
@@ -937,24 +981,62 @@ Portal линк: ${link || "(копирай линк)"}
   }
 
   async function importExcel() {
-    if (!excelFile.files || !excelFile.files.length) return openModal("Excel импорт", "Избери .xlsx файл.");
-    if (typeof XLSX === "undefined") return openModal("Липсва библиотека", "XLSX не е зареден.");
+    if (!excelFile.files || !excelFile.files.length) return openModal("Импорт", "Избери .xlsx или .csv файл.");
+
+    const ok = await loadXlsxLib();
+    if (!ok) return openModal("Импорт", "Не успях да заредя XLSX библиотеката. Провери интернет/AdBlock и пробвай пак.");
 
     const file = excelFile.files[0];
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    const name = (file.name || "").toLowerCase();
 
-    const keys = rows.length ? Object.keys(rows[0]) : [];
-    const missing = ["Program","Day","Exercise"].filter(k => !keys.includes(k));
-    if (missing.length) {
-      return openModal("Грешен формат", `Липсват колони: ${missing.join(", ")}\nОчаквано: Program | Day | Exercise | Sets | Reps | Rest | Note`);
+    // Read data
+    let rows = [];
+    if (name.endsWith(".csv")) {
+      const text = await file.text();
+      const wb = XLSX.read(text, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    } else {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
+
+      // If multiple sheets, prefer first non-empty
+      let ws = wb.Sheets[wb.SheetNames[0]];
+      for (const sn of wb.SheetNames) {
+        const candidate = wb.Sheets[sn];
+        const test = XLSX.utils.sheet_to_json(candidate, { defval: "" });
+        if (test && test.length) { ws = candidate; rows = test; break; }
+      }
+      if (!rows.length) rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    }
+
+    if (!rows.length) return openModal("Импорт", "Файлът няма редове (празен sheet).");
+
+    // Normalize/mapping headers (BG/EN)
+    rows = rows.map(mapRowKeys);
+
+    // Validate minimal columns
+    const keys = Object.keys(rows[0] || {});
+    const hasProgram = keys.includes("Program");
+    const hasDay = keys.includes("Day");
+    const hasExercise = keys.includes("Exercise");
+
+    if (!hasProgram || !hasDay || !hasExercise) {
+      return openModal("Грешен формат",
+`Не намерих задължителните колони Program/Програма, Day/Ден, Exercise/Упражнение.
+
+Намерени колони:
+${keys.join(", ")}
+
+Очакван формат (EN или BG):
+Program | Day | Exercise | Sets | Reps | Rest | Note
+Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка`);
     }
 
     const imported = parseExcelRowsToPrograms(rows);
-    if (!imported.length) return openModal("Няма данни", "Не намерих валидни редове.");
+    if (!imported.length) return openModal("Импорт", "Не намерих валидни редове (провери Program/Day/Exercise).");
 
+    // Merge by name
     const byName = new Map(state.programs.map(p => [p.name, p]));
     imported.forEach(p => byName.set(p.name, p));
     state.programs = Array.from(byName.values());
@@ -962,7 +1044,12 @@ Portal линк: ${link || "(копирай линк)"}
     excelFile.value = "";
     saveState(state);
     renderAll();
-    openModal("Импорт готов", `Импортирани/обновени програми: ${imported.length}\nОбщо: ${state.programs.length}`);
+
+    openModal("Импорт готов",
+`Импортирани/обновени програми: ${imported.length}
+Общо програми: ${state.programs.length}
+
+Съвет: Ако ползваш български колони, работи автоматично.`);
   }
 
   function applyProgramToClient(overwrite = false) {
@@ -999,8 +1086,11 @@ Portal линк: ${link || "(копирай линк)"}
 
   function showExcelFormat() {
     openModal("Excel формат",
-`Колони:
+`Колони (EN):
 Program | Day | Exercise | Sets | Reps | Rest | Note
+
+Колони (BG):
+Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка
 
 Пример:
 Hypertrophy 4w | Понеделник | Клек | 4 | 6-8 | 120s | https://youtube.com/...`);
