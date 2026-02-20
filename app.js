@@ -5,15 +5,16 @@
   function loadState() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (!raw) return { clients: [], activeId: null, programs: [], notifications: [] };
+      if (!raw) return { clients: [], activeId: null, programs: [], nutritionPrograms: [], notifications: [] };
       const parsed = JSON.parse(raw);
       parsed.clients ||= [];
       parsed.programs ||= [];
+      parsed.nutritionPrograms ||= [];
       parsed.notifications ||= [];
       if (!("activeId" in parsed)) parsed.activeId = null;
       return parsed;
     } catch {
-      return { clients: [], activeId: null, programs: [], notifications: [] };
+      return { clients: [], activeId: null, programs: [], nutritionPrograms: [], notifications: [] };
     }
   }
   function saveState(st) { localStorage.setItem(KEY, JSON.stringify(st)); }
@@ -75,6 +76,31 @@
     if (["повторения","повторение","репс"].includes(x)) return "Reps";
     if (["почивка","пауза","рест"].includes(x)) return "Rest";
     if (["бележка","бележки","коментар"].includes(x)) return "Note";
+    return "";
+  }
+
+  function normalizeMealHeader(h) {
+    const x = String(h || "").trim().toLowerCase();
+    // EN
+    if (["meal","mealtitle","title","meal title"].includes(x)) return "MealTitle";
+    if (["description","desc","details"].includes(x)) return "Desc";
+    if (["kcal","calories","cal"].includes(x)) return "Kcal";
+    if (["protein","p"].includes(x)) return "P";
+    if (["carbs","carb","c"].includes(x)) return "C";
+    if (["fat","fats","f"].includes(x)) return "F";
+    if (["time","hour"].includes(x)) return "Time";
+    if (["tag","tags","label"].includes(x)) return "Tag";
+    if (["adminnote","admin note","coach note"].includes(x)) return "AdminNote";
+    // BG
+    if (["хранене","име","заглавие","заглавие хранене"].includes(x)) return "MealTitle";
+    if (["описание","детайли"].includes(x)) return "Desc";
+    if (["ккал","калории"].includes(x)) return "Kcal";
+    if (["протеин","п"].includes(x)) return "P";
+    if (["въглехидрати","въглех","въгл","c"].includes(x)) return "C";
+    if (["мазнини","f"].includes(x)) return "F";
+    if (["час","време"].includes(x)) return "Time";
+    if (["таг","етикет"].includes(x)) return "Tag";
+    if (["админ бележка","треньор бележка","бележка треньор"].includes(x)) return "AdminNote";
     return "";
   }
 
@@ -146,6 +172,13 @@
   const openExcelFormatBtn = document.getElementById("openExcelFormatBtn");
 
   // Nutrition (Admin)
+  const nExcelFile = document.getElementById("nExcelFile");
+  const nImportBtn = document.getElementById("nImportBtn");
+  const nFormatBtn = document.getElementById("nFormatBtn");
+  const nProgramSelect = document.getElementById("nProgramSelect");
+  const nApplyBtn = document.getElementById("nApplyBtn");
+  const nApplyOverwriteBtn = document.getElementById("nApplyOverwriteBtn");
+
   const nDaySelect = document.getElementById("nDaySelect");
   const nClearDayBtn = document.getElementById("nClearDayBtn");
   const mealTitle = document.getElementById("mealTitle");
@@ -300,6 +333,7 @@
     return c;
   }
   function ensureProgramShape(p) { p.days ||= {}; return p; }
+  function ensureNutritionProgramShape(p) { p.days ||= {}; return p; }
   function getActiveClient() { return state.clients.find(x => x.id === state.activeId) || null; }
 
   // ---------- Notifications ----------
@@ -442,6 +476,23 @@
     });
   }
 
+  function renderNutritionPrograms() {
+    if (!nProgramSelect) return;
+    nProgramSelect.innerHTML = "";
+    const list = state.nutritionPrograms || [];
+    if (!list.length) {
+      nProgramSelect.innerHTML = `<option value="">— няма импортирани —</option>`;
+      return;
+    }
+    nProgramSelect.innerHTML = `<option value="">— избери —</option>`;
+    list.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      nProgramSelect.appendChild(opt);
+    });
+  }
+
   function renderPrograms() {
     programSelect.innerHTML = "";
     if (!state.programs.length) return (programSelect.innerHTML = `<option value="">— няма импортирани —</option>`);
@@ -573,6 +624,7 @@
   function renderAll() {
     state.clients = state.clients.map(ensureClientShape);
     state.programs = state.programs.map(ensureProgramShape);
+    state.nutritionPrograms = (state.nutritionPrograms || []).map(ensureNutritionProgramShape);
     state.notifications ||= [];
     saveState(state);
 
@@ -582,6 +634,7 @@
     renderPlan();
     renderNutrition();
     renderPrograms();
+    renderNutritionPrograms();
     renderPhotos();
     renderProfile();
     renderNotifCount();
@@ -951,7 +1004,7 @@ Portal линк: ${link || "(копирай линк)"}
   function exportData() { openModal("Експорт (JSON)", JSON.stringify(state, null, 2)); }
   function resetData() {
     localStorage.removeItem(KEY);
-    state = { clients: [], activeId: null, programs: [], notifications: [] };
+    state = { clients: [], activeId: null, programs: [], nutritionPrograms: [], notifications: [] };
     renderAll();
   }
 
@@ -963,6 +1016,36 @@ Portal линк: ${link || "(копирай линк)"}
     const key = d.toLowerCase().slice(0,3);
     return map[key] || d || "Понеделник";
   }
+  function parseExcelRowsToNutritionPrograms(rows) {
+    const programsMap = new Map();
+    for (const raw of rows) {
+      const r = mapRowKeys(raw); // also maps Program/Day + Note etc
+      const programName = safeStr(r.Program);
+      const day = normalizeDay(r.Day);
+      const title = safeStr(r.MealTitle || r.Meal || r.Title || r["Хранене"] || r["Заглавие"] || "");
+      if (!programName || !title) continue;
+
+      const m = {
+        id: uid(),
+        title,
+        desc: safeStr(r.Desc) || safeStr(r.Description) || safeStr(r["Описание"]) || "",
+        kcal: safeStr(r.Kcal) === "" ? "" : Number(r.Kcal),
+        p: safeStr(r.P) === "" ? "" : Number(r.P),
+        c: safeStr(r.C) === "" ? "" : Number(r.C),
+        f: safeStr(r.F) === "" ? "" : Number(r.F),
+        time: safeStr(r.Time) || "",
+        tag: safeStr(r.Tag).replaceAll("#","") || "",
+        adminNote: safeStr(r.AdminNote) || ""
+      };
+
+      if (!programsMap.has(programName)) programsMap.set(programName, { id: uid(), name: programName, days: {} });
+      const p = programsMap.get(programName);
+      p.days[day] ||= [];
+      p.days[day].push(m);
+    }
+    return Array.from(programsMap.values());
+  }
+
   function parseExcelRowsToPrograms(rows) {
     const programsMap = new Map();
     for (const r of rows) {
@@ -1050,6 +1133,120 @@ Program | Day | Exercise | Sets | Reps | Rest | Note
 Общо програми: ${state.programs.length}
 
 Съвет: Ако ползваш български колони, работи автоматично.`);
+  }
+
+  async function importNutrition() {
+    if (!nExcelFile || !nExcelFile.files || !nExcelFile.files.length) return openModal("Импорт (хранене)", "Избери .xlsx или .csv файл.");
+    const ok = await loadXlsxLib();
+    if (!ok) return openModal("Импорт (хранене)", "Не успях да заредя XLSX библиотеката. Провери интернет/AdBlock и пробвай пак.");
+
+    const file = nExcelFile.files[0];
+    const name = (file.name || "").toLowerCase();
+    let rows = [];
+    if (name.endsWith(".csv")) {
+      const text = await file.text();
+      const wb = XLSX.read(text, { type: "string" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    } else {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
+      let ws = wb.Sheets[wb.SheetNames[0]];
+      for (const sn of wb.SheetNames) {
+        const candidate = wb.Sheets[sn];
+        const test = XLSX.utils.sheet_to_json(candidate, { defval: "" });
+        if (test && test.length) { ws = candidate; rows = test; break; }
+      }
+      if (!rows.length) rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    }
+    if (!rows.length) return openModal("Импорт (хранене)", "Файлът няма редове (празен sheet).");
+
+    // Normalize headers for Program/Day/Note + then map meal headers
+    rows = rows.map((r) => {
+      const a = mapRowKeys(r);
+      const out = {};
+      for (const [k,v] of Object.entries(a)) {
+        const mk = normalizeMealHeader(k);
+        if (mk) out[mk] = v;
+        else out[k] = v;
+      }
+      return out;
+    });
+
+    const keys = Object.keys(rows[0] || {});
+    if (!keys.includes("Program") || !keys.includes("Day") || !keys.includes("MealTitle")) {
+      return openModal("Грешен формат (хранене)",
+`Липсват задължителните колони:
+- Program/Програма
+- Day/Ден
+- MealTitle/Хранене
+
+Намерени колони:
+${keys.join(", ")}
+
+Пример формат:
+Program | Day | MealTitle | Desc | Kcal | P | C | F | Time | Tag | AdminNote`);
+    }
+
+    const imported = parseExcelRowsToNutritionPrograms(rows);
+    if (!imported.length) return openModal("Импорт (хранене)", "Не намерих валидни редове (провери Program/Day/MealTitle).");
+
+    const byName = new Map((state.nutritionPrograms || []).map(p => [p.name, p]));
+    imported.forEach(p => byName.set(p.name, p));
+    state.nutritionPrograms = Array.from(byName.values());
+
+    nExcelFile.value = "";
+    saveState(state);
+    renderAll();
+
+    openModal("Импорт готов (хранене)",
+`Импортирани/обновени режими: ${imported.length}
+Общо режими: ${state.nutritionPrograms.length}`);
+  }
+
+  function applyNutritionToClient(overwrite = false) {
+    const c = getActiveClient();
+    if (!c) return openModal("Няма избран клиент", "Избери клиент.");
+    const pid = nProgramSelect?.value;
+    if (!pid) return openModal("Избери режим", "Първо избери режим (хранене).");
+
+    const p = (state.nutritionPrograms || []).find(x => x.id === pid);
+    if (!p) return;
+
+    if (overwrite) { c.nutrition = {}; c.foodStatus = {}; }
+
+    Object.keys(p.days || {}).forEach(day => {
+      c.nutrition[day] ||= [];
+      const copied = (p.days[day] || []).map(m => ({
+        id: uid(),
+        title: m.title,
+        desc: m.desc,
+        kcal: m.kcal === "" ? "" : Number(m.kcal),
+        p: m.p === "" ? "" : Number(m.p),
+        c: m.c === "" ? "" : Number(m.c),
+        f: m.f === "" ? "" : Number(m.f),
+        time: m.time || "",
+        tag: (m.tag || "").replaceAll("#",""),
+        adminNote: m.adminNote || ""
+      }));
+      c.nutrition[day].push(...copied);
+    });
+
+    saveState(state);
+    renderAll();
+    openModal("Приложено (хранене)", "Режимът е приложен към клиента. Клиентът не вижда източника.");
+  }
+
+  function showNutritionFormat() {
+    openModal("Формат (хранене)",
+`Колони (EN):
+Program | Day | MealTitle | Desc | Kcal | P | C | F | Time | Tag | AdminNote
+
+Колони (BG):
+Програма | Ден | Хранене | Описание | Ккал | Протеин | Въглехидрати | Мазнини | Час | Таг | Админ бележка
+
+Пример:
+Cut 4w | Понеделник | Закуска | овес + кисело мляко | 520 | 35 | 65 | 14 | 08:30 | high-carb | само за теб`);
   }
 
   function applyProgramToClient(overwrite = false) {
@@ -1332,6 +1529,11 @@ Hypertrophy 4w | Понеделник | Клек | 4 | 6-8 | 120s | https://yout
 
   // Nutrition
   nDaySelect.addEventListener("change", renderNutrition);
+  if (nImportBtn) nImportBtn.addEventListener("click", importNutrition);
+  if (nFormatBtn) nFormatBtn.addEventListener("click", showNutritionFormat);
+  if (nApplyBtn) nApplyBtn.addEventListener("click", () => applyNutritionToClient(false));
+  if (nApplyOverwriteBtn) nApplyOverwriteBtn.addEventListener("click", () => applyNutritionToClient(true));
+
   addMealBtn.addEventListener("click", addMeal);
   nClearDayBtn.addEventListener("click", clearNutritionDay);
   copyNutritionBtn.addEventListener("click", copyNutrition);
@@ -1398,6 +1600,7 @@ Hypertrophy 4w | Понеделник | Клек | 4 | 6-8 | 120s | https://yout
   // ---------- Init ----------
   state.clients = state.clients.map(ensureClientShape);
   state.programs = state.programs.map(ensureProgramShape);
+    state.nutritionPrograms = (state.nutritionPrograms || []).map(ensureNutritionProgramShape);
   state.notifications ||= [];
   saveState(state);
 

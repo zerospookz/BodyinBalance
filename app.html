@@ -245,6 +245,31 @@
             </div>
           </div>
 
+          <div class="divider"></div>
+
+          <div class="card-title">Импорт хранене (Excel/CSV)</div>
+          <div class="form">
+            <label>Импорт от .xlsx или .csv</label>
+            <input id="nExcelFile" type="file" accept=".xlsx,.csv" />
+            <div class="row2">
+              <button id="nImportBtn" class="btn primary">Импортирай</button>
+              <button id="nFormatBtn" class="btn ghost">Формат</button>
+            </div>
+
+            <label>Избери режим</label>
+            <select id="nProgramSelect" class="select select-modern">
+              <option value="">— няма импортирани —</option>
+            </select>
+
+            <div class="row2">
+              <button id="nApplyBtn" class="btn primary">Приложи към клиента</button>
+              <button id="nApplyOverwriteBtn" class="btn ghost">Приложи (презапиши)</button>
+            </div>
+
+            <div class="hint muted">Клиентът не вижда, че е preset.</div>
+          </div>
+
+
           <div class="card">
             <div class="card-title">Режим за деня</div>
             <div id="nutritionList" class="plan-list"></div>
