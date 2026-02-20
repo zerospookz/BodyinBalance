@@ -1,17 +1,46 @@
-# Fitness Coach Portal (Demo)
+# BodyInBalance (Firebase Sync)
 
-Това е демо проект (без backend) за:
-- Admin панел: клиенти, тренировки, хранене, чат, снимки, Excel импорт на програми
-- Client Portal: вход с код, тренировки, хранене, чат, снимки
-- Нотификации: in-app + browser desktop (ако админ табът е отворен)
+Тази версия синхронизира данните (клиенти, тренировки, хранене, чат, снимки) през **Firebase**,
+за да се виждат от **всяко устройство** (твоят PC + клиентски телефони/PC).
 
-## Стартиране
-Отвори `index.html` (двуклик) или го пусни през локален сървър.
+## 1) Firebase setup (10 мин)
+1. https://console.firebase.google.com → Create project
+2. Build → Authentication → Get started → **Email/Password** → Enable
+3. Build → Firestore Database → Create database (Production mode)
+4. Project settings → General → Your apps → Add app → Web → Copy **firebaseConfig**
+5. Сложи config-а в `firebase-config.js`
 
-## Excel формат (Sheet1)
-Колони:
-`Program | Day | Exercise | Sets | Reps | Rest | Note`
+## 2) Създай Admin акаунт
+Authentication → Users → Add user
+- Email: (твоя)
+- Password: (твоя)
+*Това е входът за admin панела.*
 
-## Важно
-- Данните са в LocalStorage (demo). Не е реална сигурност.
-- За истински нотификации 24/7 (Telegram/Email/SMS) е нужен backend (Firebase/Supabase).
+## 3) Firestore Rules (копирай)
+Firestore → Rules:
+
+```js
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // only logged-in admins can access everything
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+```
+
+> Ако искаш по-строги правила (clients да виждат само своето), кажи ми и ще ги направя.
+
+## 4) Deploy (безплатно)
+- GitHub Pages (static) или Netlify/Vercel.
+- Важно: за Firebase Auth трябва правилен domain в Firebase → Authentication → Settings → Authorized domains
+  Добави: `zerospookz.github.io` (или твоя домейн)
+
+## URLs
+- Landing: `/index.html`
+- Admin: `/admin.html`
+- Portal: `/portal.html?code=ABCD`
+

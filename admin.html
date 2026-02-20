@@ -3,40 +3,84 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Admin Login</title>
+  <title>Admin • BodyInBalance</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <div style="min-height:100vh;display:grid;place-items:center;padding:24px;">
-    <div class="panel" style="max-width:420px;">
-      <div class="panel-title">Admin вход</div>
-      <div class="muted" style="margin-bottom:12px;">Въведи парола за достъп</div>
-      <input type="password" id="adminPass" placeholder="Парола" class="select" />
-      <button id="loginBtn" class="btn primary" style="margin-top:10px;width:100%;">Вход</button>
-      <div id="error" style="color:#ff6b6b;margin-top:10px;display:none;">Грешна парола</div>
+  <div class="wrap">
+    <div class="panel">
+      <div class="top">
+        <div class="brand">
+          <div class="logo">AD</div>
+          <div>
+            <h1>Admin</h1>
+            <div class="sub">Клиенти • Импорт • Редакция (синхронизация)</div>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn" id="signOutBtn">Изход</button>
+        </div>
+      </div>
+
+      <div id="loginCard" class="card" style="margin-top:14px">
+        <h2>Вход</h2>
+        <div class="row">
+          <input id="email" type="email" placeholder="Email" />
+          <input id="pass" type="password" placeholder="Парола" />
+          <button class="btn primary" id="loginBtn">Вход</button>
+        </div>
+        <div id="loginErr" class="muted" style="margin-top:10px;color:#ff6b6b;display:none"></div>
+      </div>
+
+      <div id="appCard" class="grid" style="display:none;margin-top:14px">
+        <div class="card">
+          <h2>Клиенти</h2>
+          <div class="row">
+            <input id="newClientName" placeholder="Име (напр. Ivan)" />
+            <button class="btn primary" id="addClientBtn">+ Клиент</button>
+          </div>
+          <div class="muted" style="margin-top:8px;font-size:12px">Кодът се генерира автоматично. Дай линк: <b>/portal.html?code=КОД</b></div>
+          <div class="list" id="clientsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Импорт → автоматично към избрания клиент</h2>
+          <div class="muted">Избери клиент отляво, после импортни Excel/CSV.</div>
+
+          <div style="margin-top:10px">
+            <div class="muted" style="font-weight:900;margin-bottom:6px">Тренировки</div>
+            <input id="wFile" type="file" accept=".xlsx,.csv" />
+            <div class="row" style="margin-top:8px">
+              <button class="btn primary" id="wImportBtn">Импортирай тренировки</button>
+              <button class="btn" id="wFormatBtn">Формат</button>
+            </div>
+          </div>
+
+          <div style="margin-top:14px">
+            <div class="muted" style="font-weight:900;margin-bottom:6px">Хранене</div>
+            <input id="nFile" type="file" accept=".xlsx,.csv" />
+            <div class="row" style="margin-top:8px">
+              <button class="btn primary" id="nImportBtn">Импортирай хранене</button>
+              <button class="btn" id="nFormatBtn">Формат</button>
+            </div>
+          </div>
+
+          <div style="margin-top:14px">
+            <div class="muted" style="font-weight:900;margin-bottom:6px">Бърз преглед (избран ден)</div>
+            <div class="row">
+              <select id="daySel">
+                <option>Понеделник</option><option>Вторник</option><option>Сряда</option>
+                <option>Четвъртък</option><option>Петък</option><option>Събота</option><option>Неделя</option>
+              </select>
+            </div>
+            <div class="list" id="previewList"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script>
-    const PASSWORD = "Levski123";
-
-    const passInput = document.getElementById("adminPass");
-    const loginBtn = document.getElementById("loginBtn");
-    const error = document.getElementById("error");
-
-    function login(){
-      if(passInput.value === PASSWORD){
-        sessionStorage.setItem("admin_auth","1");
-        window.location.href = "app.html?admin=1";
-      } else {
-        error.style.display = "block";
-      }
-    }
-
-    loginBtn.addEventListener("click", login);
-    passInput.addEventListener("keydown", e=>{
-      if(e.key==="Enter") login();
-    });
-  </script>
+  <script type="module" src="admin.js"></script>
 </body>
 </html>
