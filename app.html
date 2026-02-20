@@ -6,6 +6,17 @@
   <title>Coach + Client Portal (Demo)</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const isAdmin = params.get("admin")==="1";
+  if(isAdmin){
+    if(sessionStorage.getItem("admin_auth")!=="1"){
+      window.location.href = "admin.html";
+    }
+  }
+</script>
+
 </head>
 <body>
   <div id="coachApp" class="app">
