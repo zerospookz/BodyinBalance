@@ -471,7 +471,7 @@
       `;
       el.querySelector(".del-btn").addEventListener("click", () => removeExercise(day, ex.id));
       el.querySelector(".toggle-btn").addEventListener("click", () => toggleExerciseCompleted(c, day, ex.id));
-      el.querySelector(".edit-btn").addEventListener("click", () => editExercise(day, ex.id));
+      el.querySelector(".edit-btn").addEventListener("click", () => editExerciseInline(el, day, ex.id));
       planList.appendChild(el);
     });
   }
@@ -554,7 +554,7 @@
         </div>
       `;
       el.querySelector(".del-btn").addEventListener("click", () => removeMeal(day, m.id));
-      el.querySelector(".edit-btn").addEventListener("click", () => editMeal(day, m.id));
+      el.querySelector(".edit-btn").addEventListener("click", () => editMealInline(el, day, m.id));
       nutritionList.appendChild(el);
     });
   }
@@ -755,6 +755,105 @@
     renderAll();
   }
 
+  function editExerciseInline(containerEl, day, exId) {
+    const c = getActiveClient();
+    if (!c) return;
+    const ex = (c.plan[day] || []).find(x => x.id === exId);
+    if (!ex) return;
+
+    // Prevent double editor
+    if (containerEl.classList.contains("is-editing")) return;
+    containerEl.classList.add("is-editing");
+
+    const originalHtml = containerEl.innerHTML;
+
+    containerEl.innerHTML = `
+      <div class="left" style="width:100%">
+        <div class="title">Редакция</div>
+        <div class="grid2" style="display:grid; grid-template-columns: 1.4fr .6fr; gap:10px; margin-top:10px;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Упражнение</label>
+            <input class="select" id="e_name" value="${escapeHtml(ex.name)}" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Почивка</label>
+            <input class="select" id="e_rest" value="${escapeHtml(ex.rest)}" placeholder="например 60s" />
+          </div>
+        </div>
+
+        <div class="grid3" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Серии</label>
+            <input class="select" id="e_sets" value="${escapeHtml(ex.sets)}" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Повторения</label>
+            <input class="select" id="e_reps" value="${escapeHtml(ex.reps)}" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Статус</label>
+            <select class="select select-modern" id="e_done">
+              <option value="0">Не е изпълнено</option>
+              <option value="1">Изпълнено ✅</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="muted" style="display:block; margin-bottom:6px;">Бележка за клиента (видима)</label>
+          <textarea class="select" id="e_note" rows="2" style="min-height:72px; resize:vertical;">${escapeHtml(ex.note || "")}</textarea>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="muted" style="display:block; margin-bottom:6px;">Admin бележка (скрита)</label>
+          <textarea class="select" id="e_admin" rows="2" style="min-height:72px; resize:vertical;">${escapeHtml(ex.adminNote || "")}</textarea>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn ghost" id="e_cancel">Отказ</button>
+          <button class="btn primary" id="e_save">Запази</button>
+        </div>
+      </div>
+    `;
+
+    // Set status
+    try { containerEl.querySelector("#e_done").value = ex.completed ? "1" : "0"; } catch {}
+
+    const cancelBtn = containerEl.querySelector("#e_cancel");
+    const saveBtn = containerEl.querySelector("#e_save");
+
+    cancelBtn.addEventListener("click", () => {
+      containerEl.classList.remove("is-editing");
+      containerEl.innerHTML = originalHtml;
+      // Re-bind buttons by re-render (safer)
+      renderPlan();
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const name = containerEl.querySelector("#e_name").value.trim();
+      const sets = containerEl.querySelector("#e_sets").value.trim();
+      const reps = containerEl.querySelector("#e_reps").value.trim();
+      const rest = containerEl.querySelector("#e_rest").value.trim();
+      const note = containerEl.querySelector("#e_note").value.trim();
+      const adminNote = containerEl.querySelector("#e_admin").value.trim();
+      const done = containerEl.querySelector("#e_done").value === "1";
+
+      if (name) ex.name = name;
+      ex.sets = sets || ex.sets;
+      ex.reps = reps || ex.reps;
+      ex.rest = rest || ex.rest;
+      ex.note = note;
+      ex.adminNote = adminNote;
+      ex.completed = done;
+      if (done && !ex.completedAt) ex.completedAt = new Date().toLocaleString();
+      if (!done) { ex.completedAt = null; }
+
+      saveState(state);
+      containerEl.classList.remove("is-editing");
+      renderAll();
+    });
+  }
+
   function clearDay() {
     const c = getActiveClient();
     if (!c) return openModal("Няма избран клиент", "Избери клиент.");
@@ -863,6 +962,125 @@
 
     saveState(state);
     renderAll();
+  }
+
+  function editMealInline(containerEl, day, mealId) {
+    const c = getActiveClient();
+    if (!c) return;
+    const meal = (c.nutrition[day] || []).find(x => x.id === mealId);
+    if (!meal) return;
+
+    if (containerEl.classList.contains("is-editing")) return;
+    containerEl.classList.add("is-editing");
+
+    const originalHtml = containerEl.innerHTML;
+
+    containerEl.innerHTML = `
+      <div class="left" style="width:100%">
+        <div class="title">Редакция (хранене)</div>
+
+        <div class="grid2" style="display:grid; grid-template-columns: 1.4fr .6fr; gap:10px; margin-top:10px;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Заглавие</label>
+            <input class="select" id="m_title" value="${escapeHtml(meal.title)}" placeholder="напр. Закуска" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Час</label>
+            <input class="select" id="m_time" value="${escapeHtml(meal.time || "")}" placeholder="08:30" />
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="muted" style="display:block; margin-bottom:6px;">Описание</label>
+          <textarea class="select" id="m_desc" rows="2" style="min-height:72px; resize:vertical;">${escapeHtml(meal.desc || "")}</textarea>
+        </div>
+
+        <div class="grid4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-top:10px;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Ккал</label>
+            <input class="select" id="m_kcal" value="${meal.kcal === "" ? "" : escapeHtml(String(meal.kcal))}" placeholder="напр. 520" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">P</label>
+            <input class="select" id="m_p" value="${meal.p === "" ? "" : escapeHtml(String(meal.p))}" placeholder="g" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">C</label>
+            <input class="select" id="m_c" value="${meal.c === "" ? "" : escapeHtml(String(meal.c))}" placeholder="g" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">F</label>
+            <input class="select" id="m_f" value="${meal.f === "" ? "" : escapeHtml(String(meal.f))}" placeholder="g" />
+          </div>
+        </div>
+
+        <div class="grid2" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Таг</label>
+            <input class="select" id="m_tag" value="${escapeHtml(meal.tag || "")}" placeholder="напр. high-carb" />
+          </div>
+          <div>
+            <label class="muted" style="display:block; margin-bottom:6px;">Статус</label>
+            <select class="select select-modern" id="m_done">
+              <option value="0">Не е маркирано</option>
+              <option value="1">Следвано ✅</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="muted" style="display:block; margin-bottom:6px;">Admin бележка (скрита)</label>
+          <textarea class="select" id="m_admin" rows="2" style="min-height:72px; resize:vertical;">${escapeHtml(meal.adminNote || "")}</textarea>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn ghost" id="m_cancel">Отказ</button>
+          <button class="btn primary" id="m_save">Запази</button>
+        </div>
+      </div>
+    `;
+
+    // set status
+    try { containerEl.querySelector("#m_done").value = (c.foodStatus?.[day]?.done ? "1" : "0"); } catch {}
+
+    containerEl.querySelector("#m_cancel").addEventListener("click", () => {
+      containerEl.classList.remove("is-editing");
+      containerEl.innerHTML = originalHtml;
+      renderNutrition();
+    });
+
+    containerEl.querySelector("#m_save").addEventListener("click", () => {
+      const title = containerEl.querySelector("#m_title").value.trim();
+      const time = containerEl.querySelector("#m_time").value.trim();
+      const desc = containerEl.querySelector("#m_desc").value.trim();
+      const kcal = containerEl.querySelector("#m_kcal").value.trim();
+      const p = containerEl.querySelector("#m_p").value.trim();
+      const ccarb = containerEl.querySelector("#m_c").value.trim();
+      const f = containerEl.querySelector("#m_f").value.trim();
+      const tag = containerEl.querySelector("#m_tag").value.trim();
+      const adminNote = containerEl.querySelector("#m_admin").value.trim();
+      const done = containerEl.querySelector("#m_done").value === "1";
+
+      if (title) meal.title = title;
+      meal.time = time;
+      meal.desc = desc;
+      meal.tag = tag.replaceAll("#","");
+      meal.adminNote = adminNote;
+
+      meal.kcal = kcal === "" ? "" : Number(kcal);
+      meal.p = p === "" ? "" : Number(p);
+      meal.c = ccarb === "" ? "" : Number(ccarb);
+      meal.f = f === "" ? "" : Number(f);
+
+      c.foodStatus ||= {};
+      c.foodStatus[day] ||= {};
+      c.foodStatus[day].done = done;
+      c.foodStatus[day].doneAt = done ? new Date().toLocaleString() : null;
+
+      saveState(state);
+      containerEl.classList.remove("is-editing");
+      renderAll();
+    });
   }
 
   function clearNutritionDay() {

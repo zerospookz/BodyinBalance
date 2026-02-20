@@ -283,3 +283,5 @@ select.select-modern:focus{
 }
 
 #backToCoachBtn{ display:none !important; }
+
+.plan-item.is-editing{ border-color: rgba(110,231,255,.35) !important; box-shadow: 0 0 0 4px rgba(110,231,255,.08); }
