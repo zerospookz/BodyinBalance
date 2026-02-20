@@ -71,11 +71,11 @@
     // Bulgarian
     if (["програма","програми","режим"].includes(x)) return "Program";
     if (["ден","дни","седмица","ден от седмицата"].includes(x)) return "Day";
-    if (["упражнение","упражнения","упр","упр."].includes(x)) return "Exercise";
-    if (["серии","серия","сери","сер","сер."].includes(x)) return "Sets";
-    if (["повторения","повторение","репс","повт","повт."].includes(x)) return "Reps";
-    if (["почивка","пауза","рест","поч","поч."].includes(x)) return "Rest";
-    if (["бележка","бележки","коментар","бел","бел."].includes(x)) return "Note";
+    if (["упражнение","упражнения"].includes(x)) return "Exercise";
+    if (["серии","серия"].includes(x)) return "Sets";
+    if (["повторения","повторение","репс"].includes(x)) return "Reps";
+    if (["почивка","пауза","рест"].includes(x)) return "Rest";
+    if (["бележка","бележки","коментар"].includes(x)) return "Note";
     return "";
   }
 
@@ -1011,43 +1011,45 @@ Portal линк: ${link || "(копирай линк)"}
   // ---------- Excel ----------
   function safeStr(x) { return String(x ?? "").trim(); }
   function normalizeDay(day) {
-    const raw = safeStr(day);
-    if (!raw) return "Понеделник";
+    const d0 = String(day || "").trim();
+    const d = d0.toLowerCase();
 
-    // If numeric (1-7) or contains a number like "Day 1"
-    const mNum = raw.match(/(\d+)/);
-    if (mNum) {
-      const n = Number(mNum[1]);
-      const numMap = {1:"Понеделник",2:"Вторник",3:"Сряда",4:"Четвъртък",5:"Петък",6:"Събота",7:"Неделя"};
-      if (numMap[n]) return numMap[n];
+    // 1) Weekday names (BG/EN)
+    const map = {
+      "понеделник": "Понеделник", "mon": "Понеделник", "monday": "Понеделник",
+      "вторник": "Вторник", "tue": "Вторник", "tues": "Вторник", "tuesday": "Вторник",
+      "сряда": "Сряда", "wed": "Сряда", "wednesday": "Сряда",
+      "четвъртък": "Четвъртък", "четвърт": "Четвъртък", "thu": "Четвъртък", "thur": "Четвъртък", "thurs": "Четвъртък", "thursday": "Четвъртък",
+      "петък": "Петък", "fri": "Петък", "friday": "Петък",
+      "събота": "Събота", "sat": "Събота", "saturday": "Събота",
+      "неделя": "Неделя", "sun": "Неделя", "sunday": "Неделя",
+    };
+
+    // Exact match
+    if (map[d]) return map[d];
+
+    // Prefix match ("Понеделник - ...", "Mon - ...")
+    for (const k of Object.keys(map)) {
+      if (d.startsWith(k + " ") || d.startsWith(k + "-") || d.startsWith(k + "–") || d.startsWith(k + "—")) return map[k];
     }
 
-    const d = raw.toLowerCase().trim();
+    // 2) Day numbers: "Day 1", "Day 1 – Upper Body", "Ден 1", "1", "1 - ..."
+    const numMatch =
+      d.match(/\bday\s*([1-7])\b/i) ||
+      d.match(/\bден\s*([1-7])\b/i) ||
+      d.match(/^\s*([1-7])\b/);
+    if (numMatch) {
+      const n = Number(numMatch[1]);
+      const days = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
+      return days[n-1];
+    }
 
-    // Bulgarian short
-    const bgShort = { "пон":"Понеделник","вто":"Вторник","сря":"Сряда","чет":"Четвъртък","пет":"Петък","съб":"Събота","нед":"Неделя" };
-    const key3 = d.slice(0,3);
-    if (bgShort[key3]) return bgShort[key3];
-
-    // English short/full
-    const en = {
-      "mon":"Понеделник","monday":"Понеделник",
-      "tue":"Вторник","tues":"Вторник","tuesday":"Вторник",
-      "wed":"Сряда","wednesday":"Сряда",
-      "thu":"Четвъртък","thur":"Четвъртък","thurs":"Четвъртък","thursday":"Четвъртък",
-      "fri":"Петък","friday":"Петък",
-      "sat":"Събота","saturday":"Събота",
-      "sun":"Неделя","sunday":"Неделя"
-    };
-    if (en[key3]) return en[key3];
-    if (en[d]) return en[d];
-
-    // Already Bulgarian full?
-    const bgFull = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
-    const cap = raw.trim();
-    if (bgFull.includes(cap)) return cap;
-
-    return "Понеделник";
+    // 3) Fallback: keep existing selected day (UI), otherwise today
+    try {
+      const sel = (daySelect && daySelect.value) ? daySelect.value : "";
+      if (sel) return sel;
+    } catch {}
+    return getTodayDay();
   }
   function parseExcelRowsToNutritionPrograms(rows) {
     const programsMap = new Map();
@@ -1161,15 +1163,6 @@ Program | Day | Exercise | Sets | Reps | Rest | Note
     saveState(state);
     renderAll();
 
-    // AUTO_APPLY_IMPORTED_PROGRAM: ако има избран клиент и е импортната 1 програма -> приложи веднага
-    try {
-      const c = getActiveClient();
-      if (c && imported.length === 1) {
-        programSelect.value = imported[0].id;
-        applyProgramToClient(true);
-      }
-    } catch {}
-
     openModal("Импорт готов",
 `Импортирани/обновени програми: ${imported.length}
 Общо програми: ${state.programs.length}
@@ -1240,15 +1233,6 @@ Program | Day | MealTitle | Desc | Kcal | P | C | F | Time | Tag | AdminNote`);
     nExcelFile.value = "";
     saveState(state);
     renderAll();
-
-    // AUTO_APPLY_IMPORTED_NUTRITION: ако има избран клиент и е импортнат 1 режим -> приложи веднага
-    try {
-      const c = getActiveClient();
-      if (c && imported.length === 1) {
-        nProgramSelect.value = imported[0].id;
-        applyNutritionToClient(true);
-      }
-    } catch {}
 
     openModal("Импорт готов (хранене)",
 `Импортирани/обновени режими: ${imported.length}
