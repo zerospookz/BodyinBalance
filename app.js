@@ -1115,16 +1115,23 @@ pMarkDayDoneBtn?.addEventListener("click", async ()=>{
   const day = pDaySelect.value;
   portalClient.workoutStatus ||= {};
   portalClient.workoutStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
-  try{ await updateDoc(portalClientRef, { workoutStatus: portalClient.workoutStatus });
+  try{
+    await updateDoc(portalClientRef, { workoutStatus: portalClient.workoutStatus });
+  }catch(e){
+    showErr("Portal mark workout done", e);
+  }
 });
 pFoodDoneBtn?.addEventListener("click", async ()=>{
   if(!portalClient) return;
   const day = pFoodDaySelect.value;
   portalClient.foodStatus ||= {};
   portalClient.foodStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
-  try{ await updateDoc(portalClientRef, { foodStatus: portalClient.foodStatus });
+  try{
+    await updateDoc(portalClientRef, { foodStatus: portalClient.foodStatus });
+  }catch(e){
+    showErr("Portal mark food done", e);
+  }
 });
-
 // portal chat (simple: store in same subcollection)
 function renderPortalChat(items){
   pChatBox.innerHTML = "";
@@ -1189,14 +1196,14 @@ pAddBeforeBtn?.addEventListener("click", async ()=>{
     portalClient.photos ||= { before:[], after:[] };
     portalClient.photos.before ||= [];
     portalClient.photos.before.push(...urls);
-    try{ await updateDoc(portalClientRef, { photos: portalClient.photos });
+    await updateDoc(portalClientRef, { photos: portalClient.photos });
     pBeforeFile.value="";
     openModal("Готово", `Качени снимки: ${urls.length}`);
   }catch(e){
-    console.error(e);
-    openModal("Грешка при качване", e?.message || String(e));
+    showErr("Portal upload BEFORE", e);
   }
 });
+
 pAddAfterBtn?.addEventListener("click", async ()=>{
   if(!portalClientRef) return;
   try{
@@ -1205,12 +1212,11 @@ pAddAfterBtn?.addEventListener("click", async ()=>{
     portalClient.photos ||= { before:[], after:[] };
     portalClient.photos.after ||= [];
     portalClient.photos.after.push(...urls);
-    try{ await updateDoc(portalClientRef, { photos: portalClient.photos });
+    await updateDoc(portalClientRef, { photos: portalClient.photos });
     pAfterFile.value="";
     openModal("Готово", `Качени снимки: ${urls.length}`);
   }catch(e){
-    console.error(e);
-    openModal("Грешка при качване", e?.message || String(e));
+    showErr("Portal upload AFTER", e);
   }
 });
 
