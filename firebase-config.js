@@ -1,5 +1,5 @@
 export const firebaseConfig = {
-  apiKey: "AIzaSyAIhf_vPVAt5jq_yjN_y5CfZ8d1DnS3dG0",,
+  apiKey: "AIzaSyAIhf_vPVAt5jq_yjN_y5CfZ8d1DnS3dG0",
   authDomain: "vvv-personal-training.firebaseapp.com",
   projectId: "vvv-personal-training",
   storageBucket: "vvv-personal-training.firebasestorage.app",
