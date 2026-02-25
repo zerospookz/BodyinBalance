@@ -34,11 +34,22 @@ import { firebaseConfig } from "./firebase-config.js";
 // ---------- Firebase init ----------
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
-// Ensure login survives refresh
-await setPersistence(auth, browserLocalPersistence);
-await loadProgramsFromFirestore();
+// Use let to avoid TDZ issues if any async code runs before assignment
+let db = getFirestore(app);
+let storage = getStorage(app);
+// Ensure login survives refresh (don’t crash app if browser blocks persistence)
+try {
+  await setPersistence(auth, browserLocalPersistence);
+} catch (e) {
+  console.warn("Auth persistence unavailable:", e);
+}
+// Load shared program dictionaries (workouts/nutrition) from Firestore if available
+try {
+  await loadProgramsFromFirestore();
+} catch (e) {
+  console.warn("loadProgramsFromFirestore failed:", e);
+}
+
 
 // ---------- Small helpers ----------
 const $ = (id) => document.getElementById(id);
