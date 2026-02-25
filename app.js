@@ -5,11 +5,20 @@ import {
   signInWithEmailAndPassword,
   signOut,
   setPersistence,
-  browserLocalPersistence
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import {
-  getFirestore, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs,
-  query, where, orderBy, serverTimestamp, onSnapshot, limit
+  browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"; import {   getFirestore,
+  collection,
+  doc,
+  addDoc,
+  setDoc,
+  updateDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+  onSnapshot,
+  limit
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getStorage, ref as sRef, uploadBytes, getDownloadURL
@@ -27,6 +36,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 // Ensure login survives refresh
 await setPersistence(auth, browserLocalPersistence);
+await loadProgramsFromFirestore();
 
 const db = getFirestore(app);
 const storage = getStorage(app);
@@ -241,8 +251,26 @@ let activeClientUnsub = null;
 let activeClient = null;
 let chatUnsub = null;
 let portalClientRef = null;
+function watchPortalClient(ref){
+  try{
+    if(portalUnsub){ portalUnsub(); portalUnsub=null; }
+    if(!ref) return;
+    portalUnsub = onSnapshot(ref,(snap)=>{
+      if(!snap.exists()) return;
+      portalClient = { id:snap.id, ...snap.data() };
+      // render portal screens
+      renderPortalPlan?.();
+      renderPortalNutrition?.();
+      renderPortalChat?.();
+      renderPortalPhotos?.();
+      renderPortalProfile?.();
+    });
+  }catch(e){ console.error('watchPortalClient', e); }
+}
+
 let portalClientUnsub = null;
 let portalClient = null;
+let portalUnsub = null;
 
 let workoutPrograms = loadLocal("workoutPrograms", {});
 let nutritionPrograms = loadLocal("nutritionPrograms", {});
@@ -251,6 +279,28 @@ let nutritionPrograms = loadLocal("nutritionPrograms", {});
 function loadLocal(k, fallback){
   try{ return JSON.parse(localStorage.getItem(k) || "null") ?? fallback; }catch{ return fallback; }
 }
+
+async function loadProgramsFromFirestore(){
+  try{
+    const ref = doc(db,'meta','programs');
+    const snap = await getDoc(ref);
+    if(!snap.exists()) return;
+    const data = snap.data() || {};
+    // only fill if local missing
+    if(!workoutPrograms || !Object.keys(workoutPrograms||{}).length) workoutPrograms = data.workoutPrograms || {};
+    if(!nutritionPrograms || !Object.keys(nutritionPrograms||{}).length) nutritionPrograms = data.nutritionPrograms || {};
+    saveLocal("workoutPrograms", workoutPrograms);
+    saveLocal("nutritionPrograms", nutritionPrograms);
+  }catch(e){ console.warn('loadProgramsFromFirestore', e); }
+}
+
+async function saveProgramsToFirestore(){
+  try{
+    const ref = doc(db,'meta','programs');
+    await setDoc(ref,{ workoutPrograms: workoutPrograms||{}, nutritionPrograms: nutritionPrograms||{} },{ merge:true });
+  }catch(e){ console.warn('saveProgramsToFirestore', e); }
+}
+
 function saveLocal(k, v){
   localStorage.setItem(k, JSON.stringify(v));
 }
@@ -361,10 +411,30 @@ function startClientsListener(){
   });
 }
 
+
+function watchActiveClient(clientId){
+  try{
+    if(activeClientUnsub){ activeClientUnsub(); activeClientUnsub=null; }
+    if(!clientId) return;
+    const ref = doc(db,"clients",clientId);
+    activeClientUnsub = onSnapshot(ref,(snap)=>{
+      if(!snap.exists()) return;
+      activeClient = { id:snap.id, ...snap.data() };
+      // keep UI in sync
+      renderChat?.();
+      renderPlan?.();
+      renderNutrition?.();
+      renderPhotos?.();
+      renderProfile?.();
+      updatePortalOpenBtn?.();
+    });
+  }catch(e){ console.error("watchActiveClient", e); }
+}
 async function selectClient(clientId){
   activeClientId = clientId;
   setLocal('activeClientId', clientId);
-  if(activeClientUnsub) activeClientUnsub();
+    watchActiveClient(clientId);
+if(activeClientUnsub) activeClientUnsub();
   if(chatUnsub) chatUnsub();
   activeClient = null;
 
@@ -614,6 +684,7 @@ importExcelBtn?.addEventListener("click", async ()=>{
   if(!Object.keys(parsed).length) return openModal("Импорт (тренировки)", "Не намерих упражнения в файла. Провери колоните: Програма, Ден, Упражнение, Серии, Повторения, Почивка, Бележка.");
   workoutPrograms = { ...workoutPrograms, ...parsed };
   saveLocal("workoutPrograms", workoutPrograms);
+    await saveProgramsToFirestore();
   refreshProgramSelect();
 refreshNutritionProgramSelect();
   openModal("Готово", `Импортирани програми: ${Object.keys(parsed).join(", ")}`);
@@ -798,6 +869,7 @@ nImportExcelBtn?.addEventListener("click", async ()=>{
   if(!Object.keys(parsed).length) return openModal("Импорт (хранене)", "Не намерих хранения в файла. Провери колоните: Програма, Ден, Хранене/MealTitle, Описание, Ккал, P, C, F, Час, Таг, Админ бележка.");
   nutritionPrograms = { ...nutritionPrograms, ...parsed };
   saveLocal("nutritionPrograms", nutritionPrograms);
+    await saveProgramsToFirestore();
   refreshNProgramSelect();
   openModal("Готово", `Импортирани режими: ${Object.keys(parsed).join(", ")}`);
   nExcelFile.value="";
@@ -1012,10 +1084,16 @@ openPortalBtn?.addEventListener("click", ()=>{
 // ---------- Save helper ----------
 async function saveClientPatch(patch){
   if(!activeClientId) return;
+  const ref = doc(db,"clients",activeClientId);
+  // update local model for instant UI
+  activeClient ||= { id: activeClientId };
+  Object.assign(activeClient, patch);
   try{
-    await updateDoc(doc(db,"clients",activeClientId), patch);
+    // Use merge so we don't wipe fields
+    await setDoc(ref, patch, { merge:true });
   }catch(e){
-    showErr("Запис (Firestore rules?)", e);
+    showErr("Запис (Firestore)", e);
+    throw e;
   }
 }
 // ---------- Render all admin panels ----------
