@@ -34,12 +34,10 @@ import { firebaseConfig } from "./firebase-config.js";
 // ---------- Firebase init ----------
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-// Ensure login survives refresh
-await setPersistence(auth, browserLocalPersistence);
-
 const db = getFirestore(app);
 const storage = getStorage(app);
-
+// Ensure login survives refresh
+await setPersistence(auth, browserLocalPersistence);
 await loadProgramsFromFirestore();
 
 // ---------- Small helpers ----------
