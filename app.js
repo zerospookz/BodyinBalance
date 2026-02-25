@@ -140,6 +140,7 @@ const openExcelFormatBtn = $("openExcelFormatBtn");
 const programSelect = $("programSelect");
 const applyProgramBtn = $("applyProgramBtn");
 const applyProgramOverwriteBtn = $("applyProgramOverwriteBtn");
+const workoutImportStatus = $("workoutImportStatus");
 
 // Nutrition
 const nDaySelect = $("nDaySelect");
@@ -165,6 +166,7 @@ const nOpenExcelFormatBtn = $("nOpenExcelFormatBtn");
 const nProgramSelect = $("nProgramSelect");
 const nApplyProgramBtn = $("nApplyProgramBtn");
 const nApplyProgramOverwriteBtn = $("nApplyProgramOverwriteBtn");
+const nutritionImportStatus = $("nutritionImportStatus");
 
 // Photos
 const beforeFile = $("beforeFile");
@@ -204,7 +206,7 @@ const portalMain = $("portalMain");
 const portalClientName = $("portalClientName");
 const portalSub = $("portalSub");
 
-const pTabs = qsa(".ptab[data-ptab]");
+const pTabs = qsa(".tab[data-ptab]");
 const pPanels = {
   pchat: $("ptab-pchat"),
   pplan: $("ptab-pplan"),
@@ -592,6 +594,12 @@ function refreshProgramSelect(){
     o.value = k; o.textContent = k;
     programSelect.appendChild(o);
   });
+  if(workoutImportStatus){
+    workoutImportStatus.textContent = keys.length
+      ? `Импортирани програми: ${keys.length}`
+      : `Няма импортирани програми.`;
+  }
+});
 }
 openExcelFormatBtn?.addEventListener("click", ()=>{
   openModal("Формат (тренировки)",
@@ -605,9 +613,11 @@ importExcelBtn?.addEventListener("click", async ()=>{
   if(!excelFile.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
   const rows = await sheetToRows(excelFile.files[0]);
   const parsed = parseWorkoutPrograms(rows);
+  if(!Object.keys(parsed).length) return openModal("Импорт (тренировки)", "Не намерих упражнения в файла. Провери колоните: Програма, Ден, Упражнение, Серии, Повторения, Почивка, Бележка.");
   workoutPrograms = { ...workoutPrograms, ...parsed };
   saveLocal("workoutPrograms", workoutPrograms);
   refreshProgramSelect();
+refreshNutritionProgramSelect();
   openModal("Готово", `Импортирани програми: ${Object.keys(parsed).join(", ")}`);
   excelFile.value="";
   }catch(e){ console.error(e); openModal("Грешка", e?.message || String(e)); }
@@ -632,6 +642,7 @@ function applyWorkoutProgram(overwrite=false){
 applyProgramBtn?.addEventListener("click", ()=>applyWorkoutProgram(false));
 applyProgramOverwriteBtn?.addEventListener("click", ()=>applyWorkoutProgram(true));
 refreshProgramSelect();
+refreshNutritionProgramSelect();
 
 // ---------- Nutrition ----------
 function renderNutrition(){
@@ -780,6 +791,7 @@ nImportExcelBtn?.addEventListener("click", async ()=>{
   if(!nExcelFile?.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
   const rows = await sheetToRows(nExcelFile.files[0]);
   const parsed = parseNutritionPrograms(rows);
+  if(!Object.keys(parsed).length) return openModal("Импорт (хранене)", "Не намерих хранения в файла. Провери колоните: Програма, Ден, Хранене/MealTitle, Описание, Ккал, P, C, F, Час, Таг, Админ бележка.");
   nutritionPrograms = { ...nutritionPrograms, ...parsed };
   saveLocal("nutritionPrograms", nutritionPrograms);
   refreshNProgramSelect();
