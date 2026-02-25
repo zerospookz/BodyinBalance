@@ -36,10 +36,11 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 // Ensure login survives refresh
 await setPersistence(auth, browserLocalPersistence);
-await loadProgramsFromFirestore();
 
 const db = getFirestore(app);
 const storage = getStorage(app);
+
+await loadProgramsFromFirestore();
 
 // ---------- Small helpers ----------
 const $ = (id) => document.getElementById(id);
