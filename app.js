@@ -1,17 +1,17 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  getDoc, getDocs, query, where, orderBy, limit, serverTimestamp, onSnapshot
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  getFirestore, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs,
+  query, where, orderBy, serverTimestamp, onSnapshot, limit
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 /**
- * Data model (Firestore)
- * - clients (collection)
- *   - { name, accessCode, createdAt, paid, profile, plan, dayStatus, nutrition, foodStatus, photos }
- * - clients/{clientId}/chat (subcollection)
- *   - { from: "coach"|"client", text, createdAt }
+ * Single-page app:
+ * - Admin (email/pass) manages clients + plan + nutrition + chat + photos + profile
+ * - Client Portal (no auth) enters with code (portal.html redirects to index.html?portal=1&code=...)
  */
 
 // ---------- Firebase init ----------
@@ -19,853 +19,1145 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ---------- Helpers ----------
-function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
-function nowStr() { return new Date().toLocaleString("bg-BG", { hour12: false }); }
-function escapeHtml(s) {
-  return (s ?? "").toString()
+// ---------- Small helpers ----------
+const $ = (id) => document.getElementById(id);
+const qs = (sel, root=document) => root.querySelector(sel);
+const qsa = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+function uid(len=10){
+  const a="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s=""; for(let i=0;i<len;i++) s+=a[Math.floor(Math.random()*a.length)];
+  return s;
+}
+function escapeHtml(str){
+  return String(str??"")
     .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    .replaceAll('"',"&quot;").replaceAll("'","&#39;");
 }
-function linkify(plainText) {
-  const escaped = escapeHtml(plainText || "");
-  const urlRegex = /(\bhttps?:\/\/[^\"'\s<>()]+[^\s<>()'\".,;:!?])/gi;
-  return escaped.replace(urlRegex, (url) =>
-    `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
-  );
+function linkify(htmlEscaped){
+  const urlRegex = /(\bhttps?:\/\/[^\s<>"']+)/gi;
+  return String(htmlEscaped).replace(urlRegex, (url)=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
 }
-function todayBgDay() {
-  const d = new Date().getDay(); // 0 Sun .. 6 Sat
-  const map = { 1:"Понеделник",2:"Вторник",3:"Сряда",4:"Четвъртък",5:"Петък",6:"Събота",0:"Неделя" };
-  return map[d] || "Понеделник";
+function normalizeDay(v){
+  const s = String(v??"").trim().toLowerCase();
+  const map = {
+    "понеделник":"Понеделник","пн":"Понеделник","mon":"Понеделник","monday":"Понеделник","1":"Понеделник","day 1":"Понеделник",
+    "вторник":"Вторник","вт":"Вторник","tue":"Вторник","tuesday":"Вторник","2":"Вторник","day 2":"Вторник",
+    "сряда":"Сряда","ср":"Сряда","wed":"Сряда","wednesday":"Сряда","3":"Сряда","day 3":"Сряда",
+    "четвъртък":"Четвъртък","чт":"Четвъртък","thu":"Четвъртък","thursday":"Четвъртък","4":"Четвъртък","day 4":"Четвъртък",
+    "петък":"Петък","пт":"Петък","fri":"Петък","friday":"Петък","5":"Петък","day 5":"Петък",
+    "събота":"Събота","сб":"Събота","sat":"Събота","saturday":"Събота","6":"Събота","day 6":"Събота",
+    "неделя":"Неделя","нд":"Неделя","sun":"Неделя","sunday":"Неделя","7":"Неделя","0":"Неделя","day 7":"Неделя",
+  };
+  return map[s] || (s ? (s[0].toUpperCase()+s.slice(1)) : "Понеделник");
 }
-function genCode(len=6){
-  const chars="ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  let out="";
-  for(let i=0;i<len;i++) out+=chars[Math.floor(Math.random()*chars.length)];
-  return out;
+function openModal(title, body){
+  alert(`${title}\n\n${body}`);
+}
+function getParam(k){ return new URLSearchParams(location.search).get(k); }
+async function copyToClipboard(text){
+  try{ await navigator.clipboard.writeText(text); }
+  catch{ openModal("Copy", text); }
 }
 
-// ---------- DOM ----------
-const coachApp = document.getElementById("coachApp");
-const clientPortal = document.getElementById("clientPortal");
+// ---------- DOM (Admin) ----------
+const loginScreen = $("loginScreen");
+const loginEmail = $("loginEmail");
+const loginPass = $("loginPass");
+const loginBtn = $("loginBtn");
+const loginErr = $("loginErr");
 
-const loginScreen = document.getElementById("loginScreen");
-const loginEmail = document.getElementById("loginEmail");
-const loginPass = document.getElementById("loginPass");
-const loginBtn = document.getElementById("loginBtn");
-const loginErr = document.getElementById("loginErr");
+const coachApp = $("coachApp");
+const signOutBtn = $("signOutBtn"); // may be missing in index.html; fallback later
 
-const clientName = document.getElementById("clientName");
-const addClientBtn = document.getElementById("addClientBtn");
-const clientsList = document.getElementById("clientsList");
+const clientName = $("clientName");
+const addClientBtn = $("addClientBtn");
+const clientsList = $("clientsList");
 
-const activeTitle = document.getElementById("activeTitle");
-const activeMeta = document.getElementById("activeMeta");
+const activeTitle = $("activeTitle");
+const activeMeta = $("activeMeta");
 
-const tabs = document.querySelectorAll(".tab[data-tab]");
-const tabChat = document.getElementById("tab-chat");
-const tabPlan = document.getElementById("tab-plan");
-const tabNutrition = document.getElementById("tab-nutrition");
-const tabPhotos = document.getElementById("tab-photos");
-const tabProfile = document.getElementById("tab-profile");
+const tabs = qsa(".tab[data-tab]");
+const panels = {
+  chat: $("tab-chat"),
+  plan: $("tab-plan"),
+  nutrition: $("tab-nutrition"),
+  photos: $("tab-photos"),
+  profile: $("tab-profile"),
+};
 
-// Chat (admin)
-const chatBox = document.getElementById("chatBox");
-const msgFrom = document.getElementById("msgFrom");
-const msgText = document.getElementById("msgText");
-const sendMsgBtn = document.getElementById("sendMsgBtn");
-const clearChatBtn = document.getElementById("clearChatBtn");
+// Sidebar footer
+const notifBtn = $("notifBtn");
+const notifCount = $("notifCount");
+const exportBtn = $("exportBtn");
+const resetBtn = $("resetBtn");
+const openPortalBtn = $("openPortalBtn");
 
-// Plan (admin)
-const daySelect = document.getElementById("daySelect");
-const clearDayBtn = document.getElementById("clearDayBtn");
-const planList = document.getElementById("planList");
-const addExerciseBtn = document.getElementById("addExerciseBtn");
+// Chat
+const chatBox = $("chatBox");
+const msgFrom = $("msgFrom");
+const msgText = $("msgText");
+const sendMsgBtn = $("sendMsgBtn");
+const clearChatBtn = $("clearChatBtn");
 
-// Nutrition (admin)
-const foodDaySelect = document.getElementById("foodDaySelect");
-const mealsList = document.getElementById("mealsList");
-const addMealBtn = document.getElementById("addMealBtn");
+// Plan
+const daySelect = $("daySelect");
+const clearDayBtn = $("clearDayBtn");
+const planDayTitle = $("planDayTitle");
+const planList = $("planList");
 
-// Photos (admin)
-const beforeFile = document.getElementById("beforeFile");
-const afterFile = document.getElementById("afterFile");
-const addBeforeBtn = document.getElementById("addBeforeBtn");
-const addAfterBtn = document.getElementById("addAfterBtn");
-const beforeGallery = document.getElementById("beforeGallery");
-const afterGallery = document.getElementById("afterGallery");
+const exName = $("exName");
+const exSets = $("exSets");
+const exReps = $("exReps");
+const exRest = $("exRest");
+const exNote = $("exNote");
+const exAdminNote = $("exAdminNote");
+const addExBtn = $("addExBtn");
+const markDayDoneAdminBtn = $("markDayDoneAdminBtn");
+const copyPlanBtn = $("copyPlanBtn");
 
-// Profile (admin)
-const accessCodeEl = document.getElementById("accessCode");
-const portalLinkEl = document.getElementById("portalLink");
-const paidToggle = document.getElementById("paidToggle");
-const profileNotes = document.getElementById("profileNotes");
-const saveProfileBtn = document.getElementById("saveProfileBtn");
-const profilePreview = document.getElementById("profilePreview");
+// Workouts Excel
+const excelFile = $("excelFile");
+const importExcelBtn = $("importExcelBtn");
+const openExcelFormatBtn = $("openExcelFormatBtn");
+const programSelect = $("programSelect");
+const applyProgramBtn = $("applyProgramBtn");
+const applyProgramOverwriteBtn = $("applyProgramOverwriteBtn");
 
-// Portal
-const portalSub = document.getElementById("portalSub");
-const backToCoachBtn = document.getElementById("backToCoachBtn");
-const portalLogin = document.getElementById("portalLogin");
-const portalCode = document.getElementById("portalCode");
-const portalLoginBtn = document.getElementById("portalLoginBtn");
-const portalMain = document.getElementById("portalMain");
-const portalClientName = document.getElementById("portalClientName");
+// Nutrition
+const nDaySelect = $("nDaySelect");
+const nClearDayBtn = $("nClearDayBtn");
+const nutritionList = $("nutritionList");
+const copyNutritionBtn = $("copyNutritionBtn");
 
-const pTabs = document.querySelectorAll(".tab[data-ptab]");
-const ptabPlan = document.getElementById("ptab-pplan");
-const ptabFood = document.getElementById("ptab-pfood");
-const ptabChat = document.getElementById("ptab-pchat");
-const ptabPhotos = document.getElementById("ptab-pphotos");
+const mealTitle = $("mealTitle");
+const mealDesc = $("mealDesc");
+const mealKcal = $("mealKcal");
+const mealP = $("mealP");
+const mealC = $("mealC");
+const mealF = $("mealF");
+const mealTime = $("mealTime");
+const mealTag = $("mealTag");
+const mealAdminNote = $("mealAdminNote");
+const addMealBtn = $("addMealBtn");
 
-const pDaySelect = document.getElementById("pDaySelect");
-const pPlanList = document.getElementById("pPlanList");
-const pDayDoneBtn = document.getElementById("pDayDoneBtn");
-const pDayDoneHint = document.getElementById("pDayDoneHint");
+// Nutrition Excel (new)
+const nExcelFile = $("nExcelFile");
+const nImportExcelBtn = $("nImportExcelBtn");
+const nOpenExcelFormatBtn = $("nOpenExcelFormatBtn");
+const nProgramSelect = $("nProgramSelect");
+const nApplyProgramBtn = $("nApplyProgramBtn");
+const nApplyProgramOverwriteBtn = $("nApplyProgramOverwriteBtn");
 
-const pFoodDaySelect = document.getElementById("pFoodDaySelect");
-const pFoodList = document.getElementById("pFoodList");
-const pFoodDoneBtn = document.getElementById("pFoodDoneBtn");
-const pFoodDoneHint = document.getElementById("pFoodDoneHint");
+// Photos
+const beforeFile = $("beforeFile");
+const afterFile = $("afterFile");
+const addBeforeBtn = $("addBeforeBtn");
+const addAfterBtn = $("addAfterBtn");
+const beforeGallery = $("beforeGallery");
+const afterGallery = $("afterGallery");
+const clearPhotosBtn = $("clearPhotosBtn");
 
-const pChatBox = document.getElementById("pChatBox");
-const pMsgText = document.getElementById("pMsgText");
-const pSendMsgBtn = document.getElementById("pSendMsgBtn");
+// Profile
+const goal = $("goal");
+const weight = $("weight");
+const height = $("height");
+const freq = $("freq");
+const limits = $("limits");
 
-const pBeforeFile = document.getElementById("pBeforeFile");
-const pAfterFile = document.getElementById("pAfterFile");
-const pAddBeforeBtn = document.getElementById("pAddBeforeBtn");
-const pAddAfterBtn = document.getElementById("pAddAfterBtn");
-const pBeforeGallery = document.getElementById("pBeforeGallery");
-const pAfterGallery = document.getElementById("pAfterGallery");
+const payStatus = $("payStatus");
+const packageName = $("packageName");
+const packagePrice = $("packagePrice");
 
-// Modal
-const modal = document.getElementById("modal");
-const modalTitle = document.getElementById("modalTitle");
-const modalText = document.getElementById("modalText");
-const closeModal = document.getElementById("closeModal");
-const closeModal2 = document.getElementById("closeModal2");
-const copyModalBtn = document.getElementById("copyModalBtn");
+const genCodeBtn = $("genCodeBtn");
+const copyPortalBtn = $("copyPortalBtn");
+const accessCode = $("accessCode");
+const inviteBtn = $("inviteBtn");
+const togglePaidBtn = $("togglePaidBtn");
+const saveProfileBtn = $("saveProfileBtn");
+const profilePreview = $("profilePreview");
 
-// ---------- Modal helpers ----------
-function openModal(title, text){
-  modalTitle.textContent = title;
-  modalText.value = text;
-  modal.classList.remove("hidden");
-}
-function closeModalFn(){ modal.classList.add("hidden"); }
-closeModal?.addEventListener("click", closeModalFn);
-closeModal2?.addEventListener("click", closeModalFn);
-copyModalBtn?.addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(modalText.value); } catch {}
-});
+// ---------- DOM (Portal) ----------
+const clientPortal = $("clientPortal");
+const backToCoachBtn = $("backToCoachBtn");
+const portalLogin = $("portalLogin");
+const portalCode = $("portalCode");
+const portalLoginBtn = $("portalLoginBtn");
+const portalMain = $("portalMain");
+const portalClientName = $("portalClientName");
+const portalSub = $("portalSub");
 
-// ---------- View routing ----------
-const url = new URL(window.location.href);
-const isPortal = url.searchParams.get("portal") === "1";
-const urlCode = url.searchParams.get("code") || "";
+const pTabs = qsa(".ptab[data-ptab]");
+const pPanels = {
+  pchat: $("ptab-pchat"),
+  pplan: $("ptab-pplan"),
+  pfood: $("ptab-pfood"),
+  pphotos: $("ptab-pphotos"),
+};
 
-// ---------- Firestore live state ----------
+const pDaySelect = $("pDaySelect");
+const pPlanList = $("pPlanList");
+const pMarkDayDoneBtn = $("pMarkDayDoneBtn");
+const pDayDoneHint = $("pDayDoneHint");
+
+const pFoodDaySelect = $("pFoodDaySelect");
+const pFoodList = $("pFoodList");
+const pFoodDoneBtn = $("pFoodDoneBtn");
+const pFoodHint = $("pFoodHint");
+
+const pChatBox = $("pChatBox");
+const pMsgText = $("pMsgText");
+const pSendMsgBtn = $("pSendMsgBtn");
+
+const pBeforeFile = $("pBeforeFile");
+const pAfterFile = $("pAfterFile");
+const pAddBeforeBtn = $("pAddBeforeBtn");
+const pAddAfterBtn = $("pAddAfterBtn");
+const pBeforeGallery = $("pBeforeGallery");
+const pAfterGallery = $("pAfterGallery");
+
+// ---------- State ----------
 let activeClientId = null;
-let clients = []; // cached list
-let unsubClients = null;
-let unsubChat = null; // active client chat listener
-
-function setTab(name){
-  document.querySelectorAll(".tab[data-tab]").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
-  tabChat.classList.toggle("hidden", name !== "chat");
-  tabPlan.classList.toggle("hidden", name !== "plan");
-  tabNutrition.classList.toggle("hidden", name !== "nutrition");
-  tabPhotos.classList.toggle("hidden", name !== "photos");
-  tabProfile.classList.toggle("hidden", name !== "profile");
-}
-
-function setPortalTab(name){
-  pTabs.forEach(t => t.classList.toggle("active", t.dataset.ptab === name));
-  ptabPlan.classList.toggle("hidden", name !== "pplan");
-  ptabFood.classList.toggle("hidden", name !== "pfood");
-  ptabChat.classList.toggle("hidden", name !== "pchat");
-  ptabPhotos.classList.toggle("hidden", name !== "pphotos");
-}
-
-// ---------- Admin: clients list ----------
-function renderClients(){
-  clientsList.innerHTML = "";
-  if(!clients.length){
-    clientsList.innerHTML = `<div class="empty muted">Няма клиенти. Добави от полето горе.</div>`;
-    return;
-  }
-  clients.forEach(c => {
-    const el = document.createElement("div");
-    el.className = "client-item" + (c.id === activeClientId ? " active" : "");
-    el.innerHTML = `
-      <div>
-        <div class="client-title">${escapeHtml(c.name || "Без име")}</div>
-        <div class="client-meta">Код: <b>${escapeHtml(c.accessCode || "-")}</b></div>
-      </div>
-      <div class="badge ${c.paid ? "paid":"unpaid"}">${c.paid ? "Платен":"Неплатен"}</div>
-    `;
-    el.addEventListener("click", () => selectClient(c.id));
-    clientsList.appendChild(el);
-  });
-}
-
-async function selectClient(id){
-  activeClientId = id;
-  renderClients();
-  const ref = doc(db, "clients", id);
-  const snap = await getDoc(ref);
-  if(!snap.exists()){
-    activeTitle.textContent = "Избери клиент";
-    activeMeta.textContent = "Клиентът не е намерен.";
-    return;
-  }
-  const c = { id, ...snap.data() };
-  activeTitle.textContent = c.name || "Клиент";
-  activeMeta.textContent = `Код: ${c.accessCode || "-"} • Създаден: ${c.createdAt?.toDate ? c.createdAt.toDate().toLocaleString("bg-BG",{hour12:false}) : "-"}`;
-  // render per tab
-  renderAdminProfile(c);
-  renderAdminPlan(c);
-  renderAdminNutrition(c);
-  renderAdminPhotos(c);
-  // chat listener
-  listenChat(id);
-}
-
-function listenClients(){
-  const qref = query(collection(db,"clients"), orderBy("createdAt","desc"));
-  unsubClients = onSnapshot(qref, (qs) => {
-    clients = qs.docs.map(d => ({ id:d.id, ...d.data() }));
-    renderClients();
-    if(activeClientId && !clients.some(c => c.id === activeClientId)){
-      activeClientId = null;
-    }
-  });
-}
-
-async function addClient(){
-  const name = (clientName.value || "").trim();
-  if(!name) return openModal("Име", "Въведи име на клиента.");
-  const accessCode = genCode(6);
-  const docRef = await addDoc(collection(db,"clients"), {
-    name,
-    accessCode,
-    paid: false,
-    createdAt: serverTimestamp(),
-    profile: { notes: "" },
-    plan: {},
-    dayStatus: {},
-    nutrition: {},
-    foodStatus: {},
-    photos: { before: [], after: [] }
-  });
-  clientName.value = "";
-  await selectClient(docRef.id);
-  openModal("Създаден клиент", `Клиент: ${name}\nКод за достъп: ${accessCode}\n\nPortal: portal.html?code=${accessCode}`);
-}
-
-// ---------- Admin: profile ----------
-function renderAdminProfile(c){
-  accessCodeEl.textContent = c.accessCode || "-";
-  portalLinkEl.value = `portal.html?code=${c.accessCode || ""}`;
-  paidToggle.checked = !!c.paid;
-  profileNotes.value = c.profile?.notes || "";
-  profilePreview.textContent = JSON.stringify({
-    name: c.name,
-    accessCode: c.accessCode,
-    paid: !!c.paid,
-    notes: c.profile?.notes || ""
-  }, null, 2);
-}
-
-async function saveProfile(){
-  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
-  const ref = doc(db,"clients",activeClientId);
-  await updateDoc(ref, {
-    paid: !!paidToggle.checked,
-    "profile.notes": profileNotes.value || ""
-  });
-  openModal("Запазено","Профилът е обновен.");
-}
-
-// ---------- Admin: plan ----------
-function renderAdminPlan(c){
-  const day = daySelect.value;
-  const items = (c.plan && c.plan[day]) ? c.plan[day] : [];
-  planList.innerHTML = "";
-  if(!items.length){
-    planList.innerHTML = `<div class="empty muted">Няма упражнения за ${escapeHtml(day)}.</div>`;
-    return;
-  }
-  items.forEach(ex => {
-    const el = document.createElement("div");
-    el.className = "plan-item";
-    el.innerHTML = `
-      <div class="left">
-        <div class="title">${escapeHtml(ex.name || "")}</div>
-        <div class="sub">${escapeHtml([ex.sets?`${ex.sets} серии`:"", ex.reps?`${ex.reps} повтор.`:"", ex.rest?`почивка ${ex.rest}`:""].filter(Boolean).join(" • "))}</div>
-        ${ex.note ? `<div class="note">${linkify(ex.note)}</div>` : ""}
-      </div>
-      <div class="actions">
-        <button class="btn ghost small" data-act="edit">Редакция</button>
-        <button class="btn danger small" data-act="del">✕</button>
-      </div>
-    `;
-    el.querySelector('[data-act="del"]').addEventListener("click", () => deleteExercise(day, ex.id));
-    el.querySelector('[data-act="edit"]').addEventListener("click", () => editExercise(day, ex.id));
-    planList.appendChild(el);
-  });
-}
-
-async function upsertExercise(day, ex){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const plan = c.plan || {};
-  plan[day] ||= [];
-  const idx = plan[day].findIndex(x => x.id === ex.id);
-  if(idx >= 0) plan[day][idx] = ex;
-  else plan[day].push(ex);
-  await updateDoc(ref, { plan });
-  await selectClient(activeClientId);
-}
-
-function addExercise(){
-  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
-  const day = daySelect.value;
-  const ex = { id: uid(), name: "Ново упражнение", sets: "3", reps: "8-12", rest: "90s", note: "" };
-  openModal("Добави упражнение", "Попълни данните в Admin → Тренировки като натиснеш Редакция на елемента.");
-  upsertExercise(day, ex);
-}
-
-async function editExercise(day, id){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const ex = (c.plan?.[day] || []).find(x => x.id === id);
-  if(!ex) return;
-
-  const text = `Редакция (JSON)\n\n${JSON.stringify(ex, null, 2)}\n\nСложи валиден JSON и натисни Copy → после paste обратно в този modal НЕ се поддържа.`;
-  openModal("Редакция (копирай JSON и редактирай в редактор)", text);
-  // For simplicity: quick inline prompt
-  const editedRaw = prompt("Постави JSON за упражнението:", JSON.stringify(ex));
-  if(!editedRaw) return;
-  try{
-    const edited = JSON.parse(editedRaw);
-    edited.id = ex.id;
-    await upsertExercise(day, edited);
-  }catch{
-    openModal("Грешка","Невалиден JSON.");
-  }
-}
-
-async function deleteExercise(day, id){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const plan = c.plan || {};
-  plan[day] = (plan[day] || []).filter(x => x.id !== id);
-  await updateDoc(ref, { plan });
-  await selectClient(activeClientId);
-}
-
-async function clearDay(){
-  if(!activeClientId) return;
-  const day = daySelect.value;
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const plan = c.plan || {};
-  plan[day] = [];
-  await updateDoc(ref, { plan });
-  await selectClient(activeClientId);
-}
-
-// ---------- Admin: nutrition ----------
-function mealSummary(m){
-  const parts = [];
-  if(m.protein) parts.push(`P ${m.protein}g`);
-  if(m.carbs) parts.push(`C ${m.carbs}g`);
-  if(m.fat) parts.push(`F ${m.fat}g`);
-  if(m.kcal) parts.push(`${m.kcal} kcal`);
-  return parts.join(" • ");
-}
-function renderAdminNutrition(c){
-  const day = foodDaySelect.value;
-  const meals = (c.nutrition && c.nutrition[day]) ? c.nutrition[day] : [];
-  mealsList.innerHTML = "";
-  if(!meals.length){
-    mealsList.innerHTML = `<div class="empty muted">Няма режим за ${escapeHtml(day)}.</div>`;
-    return;
-  }
-  meals.forEach(m => {
-    const el = document.createElement("div");
-    el.className = "plan-item";
-    el.innerHTML = `
-      <div class="left">
-        <div class="title">🍽 ${escapeHtml(m.title || "")}</div>
-        <div class="sub">${escapeHtml(mealSummary(m) || "")}</div>
-        ${m.desc ? `<div class="note">${linkify(m.desc)}</div>` : ""}
-      </div>
-      <div class="actions">
-        <button class="btn ghost small" data-act="edit">Редакция</button>
-        <button class="btn danger small" data-act="del">✕</button>
-      </div>
-    `;
-    el.querySelector('[data-act="del"]').addEventListener("click", () => deleteMeal(day, m.id));
-    el.querySelector('[data-act="edit"]').addEventListener("click", () => editMeal(day, m.id));
-    mealsList.appendChild(el);
-  });
-}
-
-async function upsertMeal(day, meal){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const nutrition = c.nutrition || {};
-  nutrition[day] ||= [];
-  const idx = nutrition[day].findIndex(x => x.id === meal.id);
-  if(idx >= 0) nutrition[day][idx] = meal;
-  else nutrition[day].push(meal);
-  await updateDoc(ref, { nutrition });
-  await selectClient(activeClientId);
-}
-
-function addMeal(){
-  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
-  const day = foodDaySelect.value;
-  const meal = { id: uid(), title: "Хранене", protein:"", carbs:"", fat:"", kcal:"", desc:"" };
-  upsertMeal(day, meal);
-}
-
-async function editMeal(day, id){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const meal = (c.nutrition?.[day] || []).find(x => x.id === id);
-  if(!meal) return;
-  const editedRaw = prompt("Постави JSON за храненето:", JSON.stringify(meal));
-  if(!editedRaw) return;
-  try{
-    const edited = JSON.parse(editedRaw);
-    edited.id = meal.id;
-    await upsertMeal(day, edited);
-  }catch{
-    openModal("Грешка","Невалиден JSON.");
-  }
-}
-
-async function deleteMeal(day, id){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const nutrition = c.nutrition || {};
-  nutrition[day] = (nutrition[day] || []).filter(x => x.id !== id);
-  await updateDoc(ref, { nutrition });
-  await selectClient(activeClientId);
-}
-
-// ---------- Photos (base64 in Firestore - ok for small images) ----------
-function fileToDataUrl(file){
-  return new Promise((resolve,reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-function makeThumb(ph, kind, onDelete){
-  const el = document.createElement("div");
-  el.className = "thumb";
-  el.innerHTML = `
-    <img src="${ph.dataUrl}" alt="${escapeHtml(kind)}" />
-    <button class="thumb-del" title="Изтрий">✕</button>
-  `;
-  el.querySelector(".thumb-del").addEventListener("click", () => onDelete(ph.id));
-  return el;
-}
-async function renderAdminPhotos(c){
-  beforeGallery.innerHTML = "";
-  afterGallery.innerHTML = "";
-  const before = c.photos?.before || [];
-  const after = c.photos?.after || [];
-  if(!before.length) beforeGallery.innerHTML = `<div class="empty muted">Няма снимки “Преди”.</div>`;
-  else before.forEach(ph => beforeGallery.appendChild(makeThumb(ph,"before",(id)=>deletePhoto("before",id))));
-  if(!after.length) afterGallery.innerHTML = `<div class="empty muted">Няма снимки “След”.</div>`;
-  else after.forEach(ph => afterGallery.appendChild(makeThumb(ph,"after",(id)=>deletePhoto("after",id))));
-}
-async function addPhotos(kind, files){
-  if(!activeClientId) return;
-  if(!files || !files.length) return;
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const photos = c.photos || { before: [], after: [] };
-  const list = photos[kind] || [];
-  for(const f of files){
-    const dataUrl = await fileToDataUrl(f);
-    list.push({ id: uid(), name: f.name, dataUrl, ts: nowStr() });
-  }
-  photos[kind] = list;
-  await updateDoc(ref, { photos });
-  await selectClient(activeClientId);
-}
-async function deletePhoto(kind, id){
-  const ref = doc(db,"clients",activeClientId);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const c = snap.data();
-  const photos = c.photos || { before: [], after: [] };
-  photos[kind] = (photos[kind] || []).filter(p => p.id !== id);
-  await updateDoc(ref, { photos });
-  await selectClient(activeClientId);
-}
-
-// ---------- Chat (Firestore subcollection) ----------
-function renderChatMessages(msgs, forPortal=false){
-  const box = forPortal ? pChatBox : chatBox;
-  box.innerHTML = "";
-  if(!msgs.length){
-    box.innerHTML = `<div class="empty muted">Няма съобщения. Напиши първото.</div>`;
-    return;
-  }
-  msgs.forEach(m => {
-    const row = document.createElement("div");
-    row.className = "msg " + (m.from === "coach" ? "coach" : "client");
-    row.innerHTML = `
-      <div class="bubble">
-        <div>${linkify(m.text)}</div>
-        <div class="meta">${m.from === "coach" ? "Треньор" : "Клиент"} • ${escapeHtml(m.ts || "")}</div>
-      </div>
-    `;
-    box.appendChild(row);
-  });
-  box.scrollTop = box.scrollHeight;
-}
-
-function listenChat(clientId){
-  if(unsubChat) { try{unsubChat();}catch{} }
-  const cref = collection(db,"clients",clientId,"chat");
-  const qref = query(cref, orderBy("createdAt","asc"), limit(200));
-  unsubChat = onSnapshot(qref, (qs) => {
-    const msgs = qs.docs.map(d => {
-      const data=d.data();
-      return { id:d.id, from:data.from, text:data.text, ts: data.createdAt?.toDate ? data.createdAt.toDate().toLocaleString("bg-BG",{hour12:false}) : "" };
-    });
-    renderChatMessages(msgs, false);
-    // if portal open for same client, update too
-    if(portalClientId === clientId){
-      renderChatMessages(msgs, true);
-    }
-  });
-}
-
-async function sendMessage(from, text, clientId){
-  const t = (text || "").trim();
-  if(!t) return;
-  const cref = collection(db,"clients",clientId,"chat");
-  await addDoc(cref, { from, text: t, createdAt: serverTimestamp() });
-}
-
-async function clearChat(clientId){
-  // Firestore doesn't have batch delete easily here; we do a limited delete.
-  const cref = collection(db,"clients",clientId,"chat");
-  const qs = await getDocs(query(cref, orderBy("createdAt","desc"), limit(200)));
-  const deletions = qs.docs.map(d => deleteDoc(d.ref));
-  await Promise.allSettled(deletions);
-}
-
-// ---------- Portal logic (no auth) ----------
-let portalClientId = null;
+let activeClientUnsub = null;
+let activeClient = null;
+let chatUnsub = null;
+let portalClientRef = null;
+let portalClientUnsub = null;
 let portalClient = null;
-let unsubPortalClient = null;
 
-function showPortal(){
-  coachApp.classList.add("hidden");
-  clientPortal.classList.remove("hidden");
-  portalSub.textContent = "Вход с код";
-  portalLogin.classList.remove("hidden");
-  portalMain.classList.add("hidden");
+let workoutPrograms = loadLocal("workoutPrograms", {});
+let nutritionPrograms = loadLocal("nutritionPrograms", {});
+
+// ---------- Local storage helpers (presets only) ----------
+function loadLocal(k, fallback){
+  try{ return JSON.parse(localStorage.getItem(k) || "null") ?? fallback; }catch{ return fallback; }
 }
-function showCoach(){
-  clientPortal.classList.add("hidden");
-  coachApp.classList.remove("hidden");
-  portalClientId = null;
-  portalClient = null;
-  if(unsubPortalClient){ try{unsubPortalClient();}catch{} unsubPortalClient=null; }
+function saveLocal(k, v){
+  localStorage.setItem(k, JSON.stringify(v));
 }
 
-async function findClientByCode(code){
-  const normalized = String(code || "").trim().toUpperCase();
-  if(!normalized) return null;
-  const qref = query(collection(db,"clients"), where("accessCode","==", normalized), limit(1));
-  const qs = await getDocs(qref);
-  if(qs.empty) return null;
-  const d = qs.docs[0];
-  return { id:d.id, ...d.data() };
+// ---------- Auth ----------
+function showLogin(show){
+  if(!loginScreen) return;
+  loginScreen.classList.toggle("hidden", !show);
 }
-
-function listenPortalClient(id){
-  if(unsubPortalClient){ try{unsubPortalClient();}catch{} }
-  unsubPortalClient = onSnapshot(doc(db,"clients",id), (snap) => {
-    if(!snap.exists()) return;
-    portalClient = { id:snap.id, ...snap.data() };
-    portalRefresh();
-  });
-}
-
-async function portalLoginWithCode(code){
-  const client = await findClientByCode(code);
-  if(!client) return openModal("Грешен код","Няма клиент с този код.");
-  portalClientId = client.id;
-  portalClientName.textContent = client.name || "Клиент";
-  portalSub.textContent = `Влязъл като: ${client.name || "Клиент"}`;
-  portalLogin.classList.add("hidden");
-  portalMain.classList.remove("hidden");
-  // defaults
-  const td = todayBgDay();
-  pDaySelect.value = td;
-  pFoodDaySelect.value = td;
-  setPortalTab("pplan");
-  listenPortalClient(client.id);
-}
-
-function getPortalClient(){ return portalClient; }
-
-// Portal render
-function portalRenderPlan(){
-  const c = getPortalClient();
-  pPlanList.innerHTML = "";
-  if(!c) return;
-  const day = pDaySelect.value;
-  const items = c.plan?.[day] || [];
-  const ds = c.dayStatus?.[day];
-  pDayDoneHint.textContent = ds?.done ? `✅ Маркирано на: ${ds.doneAt}` : `Още не е маркирано за този ден.`;
-
-  if(!items.length){
-    pPlanList.innerHTML = `<div class="empty muted">Няма упражнения за ${escapeHtml(day)}.</div>`;
-    return;
-  }
-  items.forEach(ex => {
-    const el = document.createElement("div");
-    el.className = "plan-item";
-    el.innerHTML = `
-      <div class="left">
-        <div class="title">${escapeHtml(ex.name || "")} ${ex.completed ? "✅" : ""}</div>
-        <div class="sub">${escapeHtml([ex.sets?`${ex.sets} серии`:"", ex.reps?`${ex.reps} повтор.`:"", ex.rest?`почивка ${ex.rest}`:""].filter(Boolean).join(" • "))}</div>
-        ${ex.note ? `<div class="note">${linkify(ex.note)}</div>` : ""}
-      </div>
-      <div></div>
-    `;
-    pPlanList.appendChild(el);
-  });
-}
-async function portalDayDone(){
-  const c = getPortalClient();
-  if(!c) return;
-  const day = pDaySelect.value;
-  const dayStatus = c.dayStatus || {};
-  dayStatus[day] = { done:true, doneAt: nowStr() };
-  await updateDoc(doc(db,"clients",c.id), { dayStatus });
-}
-function portalRenderFood(){
-  const c = getPortalClient();
-  pFoodList.innerHTML = "";
-  if(!c) return;
-  const day = pFoodDaySelect.value;
-  const meals = c.nutrition?.[day] || [];
-  const fs = c.foodStatus?.[day];
-  pFoodDoneHint.textContent = fs?.done ? `✅ Маркирано на: ${fs.doneAt}` : `Още не е маркирано за този ден.`;
-
-  if(!meals.length){
-    pFoodList.innerHTML = `<div class="empty muted">Няма зададен режим за ${escapeHtml(day)}.</div>`;
-    return;
-  }
-  meals.forEach(m => {
-    const el = document.createElement("div");
-    el.className = "plan-item";
-    el.innerHTML = `
-      <div class="left">
-        <div class="title">🍽 ${escapeHtml(m.title || "")}</div>
-        <div class="sub">${escapeHtml(mealSummary(m) || "")}</div>
-        ${m.desc ? `<div class="note">${linkify(m.desc)}</div>` : ""}
-      </div>
-      <div></div>
-    `;
-    pFoodList.appendChild(el);
-  });
-}
-async function portalFoodDone(){
-  const c = getPortalClient();
-  if(!c) return;
-  const day = pFoodDaySelect.value;
-  const foodStatus = c.foodStatus || {};
-  foodStatus[day] = { done:true, doneAt: nowStr() };
-  await updateDoc(doc(db,"clients",c.id), { foodStatus });
-}
-function portalRenderPhotos(){
-  const c = getPortalClient();
-  pBeforeGallery.innerHTML = "";
-  pAfterGallery.innerHTML = "";
-  if(!c) return;
-  const before = c.photos?.before || [];
-  const after = c.photos?.after || [];
-  if(!before.length) pBeforeGallery.innerHTML = `<div class="empty muted">Няма снимки “Преди”.</div>`;
-  else before.forEach(ph => {
-    const el = document.createElement("div");
-    el.className="thumb";
-    el.innerHTML=`<img src="${ph.dataUrl}" alt="before" />`;
-    pBeforeGallery.appendChild(el);
-  });
-  if(!after.length) pAfterGallery.innerHTML = `<div class="empty muted">Няма снимки “След”.</div>`;
-  else after.forEach(ph => {
-    const el = document.createElement("div");
-    el.className="thumb";
-    el.innerHTML=`<img src="${ph.dataUrl}" alt="after" />`;
-    pAfterGallery.appendChild(el);
-  });
-}
-async function portalSendMessage(){
-  const c = getPortalClient();
-  const text = (pMsgText.value || "").trim();
-  if(!c || !text) return;
-  pMsgText.value = "";
-  await sendMessage("client", text, c.id);
-}
-async function portalAddPhotos(kind, files){
-  const c = getPortalClient();
-  if(!c) return;
-  if(!files || !files.length) return;
-  // same storage as admin
-  const ref = doc(db,"clients",c.id);
-  const snap = await getDoc(ref);
-  if(!snap.exists()) return;
-  const cd = snap.data();
-  const photos = cd.photos || { before: [], after: [] };
-  const list = photos[kind] || [];
-  for(const f of files){
-    const dataUrl = await fileToDataUrl(f);
-    list.push({ id: uid(), name: f.name, dataUrl, ts: nowStr() });
-  }
-  photos[kind] = list;
-  await updateDoc(ref, { photos });
-}
-
-function portalRefresh(){
-  portalRenderPlan();
-  portalRenderFood();
-  portalRenderPhotos();
-  // chat updated by listener when active
-}
-
-// ---------- Events ----------
-tabs.forEach(t => t.addEventListener("click", () => setTab(t.dataset.tab)));
-pTabs.forEach(t => t.addEventListener("click", () => setPortalTab(t.dataset.ptab)));
-
-loginBtn?.addEventListener("click", async () => {
+loginBtn?.addEventListener("click", async ()=>{
   loginErr.textContent = "";
-  const email = (loginEmail.value||"").trim();
-  const pass = loginPass.value||"";
   try{
-    await signInWithEmailAndPassword(auth, email, pass);
+    await signInWithEmailAndPassword(auth, (loginEmail.value||"").trim(), loginPass.value||"");
   }catch(e){
     loginErr.textContent = e?.message || "Грешка при вход.";
   }
 });
-
-addClientBtn?.addEventListener("click", addClient);
-daySelect?.addEventListener("change", async () => activeClientId && selectClient(activeClientId));
-foodDaySelect?.addEventListener("change", async () => activeClientId && selectClient(activeClientId));
-addExerciseBtn?.addEventListener("click", addExercise);
-clearDayBtn?.addEventListener("click", clearDay);
-addMealBtn?.addEventListener("click", addMeal);
-
-addBeforeBtn?.addEventListener("click", () => addPhotos("before", beforeFile.files));
-addAfterBtn?.addEventListener("click", () => addPhotos("after", afterFile.files));
-
-saveProfileBtn?.addEventListener("click", saveProfile);
-portalLinkEl?.addEventListener("focus", () => portalLinkEl.select());
-
-sendMsgBtn?.addEventListener("click", async () => {
-  if(!activeClientId) return;
-  await sendMessage(msgFrom.value, msgText.value, activeClientId);
-  msgText.value = "";
-});
-msgText?.addEventListener("keydown", (e) => {
-  if(e.key === "Enter"){ e.preventDefault(); sendMsgBtn.click(); }
-});
-clearChatBtn?.addEventListener("click", async () => {
-  if(!activeClientId) return;
-  await clearChat(activeClientId);
-});
-
-backToCoachBtn?.addEventListener("click", showCoach);
-portalLoginBtn?.addEventListener("click", () => portalLoginWithCode(portalCode.value));
-portalCode?.addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ e.preventDefault(); portalLoginBtn.click(); } });
-
-pDaySelect?.addEventListener("change", portalRenderPlan);
-pFoodDaySelect?.addEventListener("change", portalRenderFood);
-pDayDoneBtn?.addEventListener("click", portalDayDone);
-pFoodDoneBtn?.addEventListener("click", portalFoodDone);
-pSendMsgBtn?.addEventListener("click", portalSendMessage);
-pMsgText?.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); pSendMsgBtn.click(); } });
-
-pAddBeforeBtn?.addEventListener("click", () => portalAddPhotos("before", pBeforeFile.files));
-pAddAfterBtn?.addEventListener("click", () => portalAddPhotos("after", pAfterFile.files));
-
-// Admin logout button: reuse existing "resetBtn" area? If you want a logout button, use the top-left brand click.
-document.addEventListener("keydown", async (e) => {
-  if(e.key === "Escape") closeModalFn();
-});
-
-// ---------- Boot ----------
-function showLogin(){
-  loginScreen.classList.remove("hidden");
-  coachApp.classList.add("hidden");
-}
-function showAdmin(){
-  loginScreen.classList.add("hidden");
-  coachApp.classList.remove("hidden");
-}
-
-async function bootPortal(){
-  showPortal();
-  if(urlCode){
-    await portalLoginWithCode(urlCode);
-  }
-}
-
-function bootAdmin(){
-  setTab("chat");
-  listenClients();
-}
-
-onAuthStateChanged(auth, (user) => {
-  if(isPortal){
-    // portal doesn't require auth; ignore auth state
+onAuthStateChanged(auth, (user)=>{
+  const portalMode = getParam("portal")==="1";
+  if(portalMode){
+    // portal does NOT require auth
+    showPortalUI(true);
+    showAdminUI(false);
+    initPortalFromUrl();
     return;
   }
   if(user){
-    showAdmin();
-    bootAdmin();
+    showLogin(false);
+    showAdminUI(true);
+    startClientsListener();
   }else{
-    showLogin();
+    showAdminUI(false);
+    showLogin(true);
   }
 });
+// signout (only if button exists in UI)
+qsa("#signOutBtn").forEach(btn=>btn.addEventListener("click", ()=>signOut(auth)));
 
-if(isPortal){
-  bootPortal();
-}else{
-  // if user is already signed in, admin will show in onAuthStateChanged
-  // else login overlay
-  showLogin();
+function showAdminUI(show){
+  if(coachApp) coachApp.style.display = show ? "" : "none";
+  if(clientPortal) clientPortal.classList.toggle("hidden", true);
 }
+function showPortalUI(show){
+  if(clientPortal) clientPortal.classList.toggle("hidden", !show);
+  if(coachApp) coachApp.style.display = show ? "none" : "";
+}
+
+// ---------- Tabs (Admin) ----------
+function setTab(tab){
+  tabs.forEach(t=>t.classList.toggle("active", t.dataset.tab===tab));
+  Object.entries(panels).forEach(([k, el])=>{
+    if(!el) return;
+    el.classList.toggle("hidden", k!==tab);
+  });
+}
+tabs.forEach(t=>t.addEventListener("click", ()=> setTab(t.dataset.tab)));
+setTab("chat");
+
+// ---------- Tabs (Portal) ----------
+function setPTab(tab){
+  pTabs.forEach(t=>t.classList.toggle("active", t.dataset.ptab===tab));
+  Object.entries(pPanels).forEach(([k, el])=>{
+    if(!el) return;
+    el.classList.toggle("hidden", k!==tab);
+  });
+}
+pTabs.forEach(t=>t.addEventListener("click", ()=> setPTab(t.dataset.ptab)));
+setPTab("pplan");
+
+// ---------- Clients list (Admin) ----------
+function startClientsListener(){
+  const q = query(collection(db,"clients"), orderBy("createdAt","desc"));
+  onSnapshot(q, (snap)=>{
+    clientsList.innerHTML = "";
+    snap.forEach((d)=>{
+      const c = { id:d.id, ...d.data() };
+      const el = document.createElement("div");
+      el.className = "client-row" + (activeClientId===c.id ? " active": "");
+      el.innerHTML = `
+        <div class="client-name">${escapeHtml(c.name||"")}</div>
+        <div class="client-meta muted">Код: <b>${escapeHtml(c.accessCode||c.code||"")}</b></div>
+      `;
+      el.addEventListener("click", ()=> selectClient(c.id));
+      clientsList.appendChild(el);
+    });
+  });
+}
+
+async function selectClient(clientId){
+  activeClientId = clientId;
+  if(activeClientUnsub) activeClientUnsub();
+  if(chatUnsub) chatUnsub();
+  activeClient = null;
+
+  const ref = doc(db,"clients", clientId);
+  activeClientUnsub = onSnapshot(ref, (s)=>{
+    activeClient = { id:s.id, ...s.data() };
+    renderActiveHeader();
+    renderAll();
+  });
+
+  // chat subcollection
+  const chatQ = query(collection(db,"clients",clientId,"chat"), orderBy("createdAt","asc"), limit(200));
+  chatUnsub = onSnapshot(chatQ, (snap)=>{
+    renderChat(snap.docs.map(d=>({id:d.id, ...d.data()})));
+  });
+}
+
+addClientBtn?.addEventListener("click", async ()=>{
+  const name = (clientName.value||"").trim();
+  if(!name) return;
+  const accessCode = uid(6);
+  await addDoc(collection(db,"clients"), {
+    name,
+    accessCode,
+    createdAt: serverTimestamp(),
+    paidStatus: "unpaid",
+    packageName: "",
+    packagePrice: "",
+    profile: { goal:"", weight:"", height:"", freq:"", limits:"" },
+    plan: {},
+    nutrition: {},
+    workoutStatus: {},
+    foodStatus: {},
+    photos: { before:[], after:[] },
+  });
+  clientName.value="";
+});
+
+function renderActiveHeader(){
+  if(!activeTitle || !activeMeta) return;
+  if(!activeClient){
+    activeTitle.textContent = "Избери клиент";
+    activeMeta.textContent = "Добави клиент отляво и кликни върху него.";
+    return;
+  }
+  activeTitle.textContent = activeClient.name || "Клиент";
+  const code = activeClient.accessCode || activeClient.code || "";
+  activeMeta.innerHTML = `Код: <b>${escapeHtml(code)}</b> • Portal: <b>portal.html?code=${escapeHtml(code)}</b>`;
+}
+
+// ---------- Chat ----------
+function renderChat(items){
+  chatBox.innerHTML = "";
+  items.forEach(m=>{
+    const el = document.createElement("div");
+    el.className = "msg " + (m.from==="coach" ? "me" : "them");
+    el.innerHTML = `
+      <div class="msg-meta muted">${escapeHtml(m.from||"")} • ${m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString("bg-BG",{hour12:false}) : ""}</div>
+      <div class="msg-text">${linkify(escapeHtml(m.text||""))}</div>
+    `;
+    chatBox.appendChild(el);
+  });
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+sendMsgBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const text = (msgText.value||"").trim();
+  if(!text) return;
+  await addDoc(collection(db,"clients",activeClientId,"chat"), {
+    from: msgFrom.value || "coach",
+    text,
+    createdAt: serverTimestamp()
+  });
+  msgText.value="";
+});
+msgText?.addEventListener("keydown", (e)=>{ if(e.key==="Enter") sendMsgBtn.click(); });
+clearChatBtn?.addEventListener("click", async ()=>{
+  openModal("Чат", "Изчистването на чат (subcollection) изисква backend/Cloud Function.\nЗасега можеш да игнорираш или да го изтриеш ръчно от Firebase Console.");
+});
+
+// ---------- Plan ----------
+function renderPlan(){
+  if(!activeClient){ planList.innerHTML=""; return; }
+  const day = daySelect.value;
+  if(planDayTitle) planDayTitle.textContent = day;
+  const list = activeClient.plan?.[day] || [];
+  planList.innerHTML = "";
+  list.forEach((ex)=>{
+    const el = document.createElement("div");
+    el.className="item";
+    el.innerHTML = `
+      <div>
+        <div class="title">${escapeHtml(ex.name||"")}</div>
+        <div class="meta">
+          ${ex.sets?`<span class="pill">${escapeHtml(ex.sets)} сер.</span>`:""}
+          ${ex.reps?`<span class="pill">${escapeHtml(ex.reps)} повт.</span>`:""}
+          ${ex.rest?`<span class="pill">⏱ ${escapeHtml(ex.rest)}</span>`:""}
+        </div>
+        ${ex.note?`<div class="note">${linkify(escapeHtml(ex.note))}</div>`:""}
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button class="btn ghost" data-act="edit">✏</button>
+        <button class="btn danger" data-act="del">🗑</button>
+      </div>
+    `;
+    el.querySelector('[data-act="edit"]').addEventListener("click", async ()=>{
+      const name = prompt("Упражнение", ex.name||"") ?? ex.name;
+      ex.name = (name||"").trim() || ex.name;
+      await saveClientPatch({ plan: activeClient.plan });
+    });
+    el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
+      const i = list.findIndex(x=>x.id===ex.id);
+      if(i>=0) list.splice(i,1);
+      await saveClientPatch({ plan: activeClient.plan });
+    });
+    planList.appendChild(el);
+  });
+}
+addExBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const day = daySelect.value;
+  const ex = {
+    id: uid(10),
+    name: (exName.value||"").trim(),
+    sets: (exSets.value||"").toString().trim(),
+    reps: (exReps.value||"").toString().trim(),
+    rest: (exRest.value||"").toString().trim(),
+    note: (exNote.value||"").trim(),
+    adminNote: (exAdminNote.value||"").trim(),
+    completed: false,
+    completedAt: null,
+  };
+  if(!ex.name) return;
+  activeClient.plan ||= {};
+  activeClient.plan[day] ||= [];
+  activeClient.plan[day].push(ex);
+  await saveClientPatch({ plan: activeClient.plan });
+  exName.value=""; exNote.value=""; exAdminNote.value="";
+});
+clearDayBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  const day = daySelect.value;
+  activeClient.plan ||= {};
+  activeClient.plan[day] = [];
+  await saveClientPatch({ plan: activeClient.plan });
+});
+copyPlanBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  const from = daySelect.value;
+  const to = prompt("Копирай плана към ден (Понеделник..Неделя):", from) || "";
+  const toDay = normalizeDay(to);
+  activeClient.plan ||= {};
+  activeClient.plan[toDay] = JSON.parse(JSON.stringify(activeClient.plan[from] || []));
+  await saveClientPatch({ plan: activeClient.plan });
+});
+markDayDoneAdminBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  const day = daySelect.value;
+  activeClient.workoutStatus ||= {};
+  activeClient.workoutStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
+  await saveClientPatch({ workoutStatus: activeClient.workoutStatus });
+});
+daySelect?.addEventListener("change", renderPlan);
+
+// ---------- Workouts Excel import (program presets) ----------
+function normalizeHeader(h){
+  const x = String(h||"").trim().toLowerCase();
+  const m = {
+    program:["program","programme","програма","програми","режим","template","plan"],
+    day:["day","ден","дни","weekday","ден от седмицата"],
+    exercise:["exercise","movement","упражнение","упражнения","упр","ex"],
+    sets:["sets","set","серии","серия","сер"],
+    reps:["reps","rep","repetitions","повторения","повторение","повт"],
+    rest:["rest","pause","break","почивка","пауза","рест"],
+    note:["note","notes","бележка","бележки","коментар","comments"],
+  };
+  for(const [k, arr] of Object.entries(m)){
+    if(arr.includes(x)) return k;
+  }
+  return "";
+}
+function mapRowKeys(row){
+  const out = {};
+  for(const [k,v] of Object.entries(row||{})){
+    const nk = normalizeHeader(k);
+    out[nk || k] = v;
+  }
+  return out;
+}
+function safeStr(v){ return String(v??"").trim(); }
+
+function parseWorkoutPrograms(rows){
+  const programs = {};
+  for(const r0 of rows.map(mapRowKeys)){
+    const prog = safeStr(r0.program) || "Default";
+    const day = normalizeDay(r0.day);
+    const exName = safeStr(r0.exercise);
+    if(!exName) continue;
+    programs[prog] ||= {};
+    programs[prog][day] ||= [];
+    programs[prog][day].push({
+      id: uid(10),
+      name: exName,
+      sets: safeStr(r0.sets),
+      reps: safeStr(r0.reps),
+      rest: safeStr(r0.rest),
+      note: safeStr(r0.note),
+      adminNote: "",
+      completed:false,
+      completedAt:null,
+    });
+  }
+  return programs;
+}
+async function sheetToRows(file){
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type:"array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { defval:"" });
+}
+function refreshProgramSelect(){
+  const keys = Object.keys(workoutPrograms || {});
+  programSelect.innerHTML = `<option value="">— няма импортирани —</option>`;
+  keys.forEach(k=>{
+    const o=document.createElement("option");
+    o.value = k; o.textContent = k;
+    programSelect.appendChild(o);
+  });
+}
+openExcelFormatBtn?.addEventListener("click", ()=>{
+  openModal("Формат (тренировки)",
+`Колони (EN): Program | Day | Exercise | Sets | Reps | Rest | Note
+Колони (BG): Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка
+
+Day може да е: Понеделник или Mon/Monday или 1..7`);
+});
+importExcelBtn?.addEventListener("click", async ()=>{
+  if(!excelFile.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
+  const rows = await sheetToRows(excelFile.files[0]);
+  const parsed = parseWorkoutPrograms(rows);
+  workoutPrograms = { ...workoutPrograms, ...parsed };
+  saveLocal("workoutPrograms", workoutPrograms);
+  refreshProgramSelect();
+  openModal("Готово", `Импортирани програми: ${Object.keys(parsed).join(", ")}`);
+  excelFile.value="";
+});
+function applyWorkoutProgram(overwrite=false){
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const prog = programSelect.value;
+  if(!prog) return openModal("Програма","Избери програма.");
+  const plan = workoutPrograms?.[prog] || {};
+  activeClient.plan ||= {};
+  if(overwrite){
+    activeClient.plan = JSON.parse(JSON.stringify(plan));
+  }else{
+    // merge by day (append)
+    for(const [day, arr] of Object.entries(plan)){
+      activeClient.plan[day] ||= [];
+      activeClient.plan[day].push(...JSON.parse(JSON.stringify(arr)));
+    }
+  }
+  return saveClientPatch({ plan: activeClient.plan, workoutStatus: {} });
+}
+applyProgramBtn?.addEventListener("click", ()=>applyWorkoutProgram(false));
+applyProgramOverwriteBtn?.addEventListener("click", ()=>applyWorkoutProgram(true));
+refreshProgramSelect();
+
+// ---------- Nutrition ----------
+function renderNutrition(){
+  if(!activeClient){ nutritionList.innerHTML=""; return; }
+  const day = nDaySelect.value;
+  const list = activeClient.nutrition?.[day] || [];
+  nutritionList.innerHTML="";
+  list.forEach((m)=>{
+    const el=document.createElement("div");
+    el.className="item";
+    el.innerHTML = `
+      <div>
+        <div class="title">${escapeHtml(m.title||"")}${m.time?` <span class="muted" style="font-weight:800">${escapeHtml(m.time)}</span>`:""}</div>
+        <div class="meta">
+          ${m.kcal!=="" && m.kcal!=null ? `<span class="pill">🔥 ${escapeHtml(String(m.kcal))} kcal</span>`:""}
+          ${m.p!=="" && m.p!=null ? `<span class="pill">P ${escapeHtml(String(m.p))}g</span>`:""}
+          ${m.c!=="" && m.c!=null ? `<span class="pill">C ${escapeHtml(String(m.c))}g</span>`:""}
+          ${m.f!=="" && m.f!=null ? `<span class="pill">F ${escapeHtml(String(m.f))}g</span>`:""}
+          ${m.tag?`<span class="pill">#${escapeHtml(m.tag)}</span>`:""}
+        </div>
+        ${m.desc?`<div class="note">${linkify(escapeHtml(m.desc))}</div>`:""}
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;">
+        <button class="btn danger" data-act="del">🗑</button>
+      </div>
+    `;
+    el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
+      const i = list.findIndex(x=>x.id===m.id);
+      if(i>=0) list.splice(i,1);
+      await saveClientPatch({ nutrition: activeClient.nutrition });
+    });
+    nutritionList.appendChild(el);
+  });
+}
+addMealBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const day = nDaySelect.value;
+  const meal = {
+    id: uid(10),
+    title: (mealTitle.value||"").trim(),
+    desc: (mealDesc.value||"").trim(),
+    kcal: (mealKcal.value==="" ? "" : Number(mealKcal.value)),
+    p: (mealP.value==="" ? "" : Number(mealP.value)),
+    c: (mealC.value==="" ? "" : Number(mealC.value)),
+    f: (mealF.value==="" ? "" : Number(mealF.value)),
+    time: (mealTime.value||"").trim(),
+    tag: (mealTag.value||"").trim().replaceAll("#",""),
+    adminNote: (mealAdminNote.value||"").trim(),
+  };
+  if(!meal.title) return;
+  activeClient.nutrition ||= {};
+  activeClient.nutrition[day] ||= [];
+  activeClient.nutrition[day].push(meal);
+  await saveClientPatch({ nutrition: activeClient.nutrition });
+  mealTitle.value=""; mealDesc.value=""; mealKcal.value=""; mealP.value=""; mealC.value=""; mealF.value=""; mealTime.value=""; mealTag.value=""; mealAdminNote.value="";
+});
+nClearDayBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  const day = nDaySelect.value;
+  activeClient.nutrition ||= {};
+  activeClient.nutrition[day] = [];
+  await saveClientPatch({ nutrition: activeClient.nutrition });
+});
+copyNutritionBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  const from = nDaySelect.value;
+  const to = prompt("Копирай храненето към ден (Понеделник..Неделя):", from) || "";
+  const toDay = normalizeDay(to);
+  activeClient.nutrition ||= {};
+  activeClient.nutrition[toDay] = JSON.parse(JSON.stringify(activeClient.nutrition[from] || []));
+  await saveClientPatch({ nutrition: activeClient.nutrition });
+});
+nDaySelect?.addEventListener("change", renderNutrition);
+
+// Nutrition Excel presets
+function normalizeFoodHeader(h){
+  const x = String(h||"").trim().toLowerCase();
+  const m = {
+    program:["program","programme","програма","програми","режим","template","plan"],
+    day:["day","ден","дни","weekday","ден от седмицата"],
+    title:["meal","mealtitle","title","meal title","хранене","име","заглавие"],
+    desc:["description","desc","details","описание","детайли"],
+    kcal:["kcal","calories","cal","ккал","калории"],
+    p:["protein","p","протеин"],
+    c:["carbs","carb","c","въглехидрати","въглех","въгл"],
+    f:["fat","fats","f","мазнини"],
+    time:["time","hour","час","време"],
+    tag:["tag","tags","label","таг","етикет"],
+    adminNote:["adminnote","admin note","coach note","админ бележка","треньор бележка","бележка треньор"],
+  };
+  for(const [k, arr] of Object.entries(m)){
+    if(arr.includes(x)) return k;
+  }
+  return "";
+}
+function mapFoodRowKeys(row){
+  const out = {};
+  for(const [k,v] of Object.entries(row||{})){
+    const nk = normalizeFoodHeader(k);
+    out[nk || k] = v;
+  }
+  return out;
+}
+function parseNutritionPrograms(rows){
+  const programs = {};
+  for(const r0 of rows.map(mapFoodRowKeys)){
+    const prog = safeStr(r0.program) || "Default";
+    const day = normalizeDay(r0.day);
+    const title = safeStr(r0.title);
+    if(!title) continue;
+    programs[prog] ||= {};
+    programs[prog][day] ||= [];
+    programs[prog][day].push({
+      id: uid(10),
+      title,
+      desc: safeStr(r0.desc),
+      kcal: safeStr(r0.kcal)==="" ? "" : Number(r0.kcal),
+      p: safeStr(r0.p)==="" ? "" : Number(r0.p),
+      c: safeStr(r0.c)==="" ? "" : Number(r0.c),
+      f: safeStr(r0.f)==="" ? "" : Number(r0.f),
+      time: safeStr(r0.time),
+      tag: safeStr(r0.tag).replaceAll("#",""),
+      adminNote: safeStr(r0.adminNote),
+    });
+  }
+  return programs;
+}
+function refreshNProgramSelect(){
+  if(!nProgramSelect) return;
+  const keys = Object.keys(nutritionPrograms || {});
+  nProgramSelect.innerHTML = `<option value="">— няма импортирани —</option>`;
+  keys.forEach(k=>{
+    const o=document.createElement("option");
+    o.value=k; o.textContent=k;
+    nProgramSelect.appendChild(o);
+  });
+}
+nOpenExcelFormatBtn?.addEventListener("click", ()=>{
+  openModal("Формат (хранене)",
+`Колони (EN): Program | Day | MealTitle | Desc | Kcal | P | C | F | Time | Tag | AdminNote
+Колони (BG): Програма | Ден | Хранене | Описание | Ккал | Протеин | Въглехидрати | Мазнини | Час | Таг | Админ бележка`);
+});
+nImportExcelBtn?.addEventListener("click", async ()=>{
+  if(!nExcelFile?.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
+  const rows = await sheetToRows(nExcelFile.files[0]);
+  const parsed = parseNutritionPrograms(rows);
+  nutritionPrograms = { ...nutritionPrograms, ...parsed };
+  saveLocal("nutritionPrograms", nutritionPrograms);
+  refreshNProgramSelect();
+  openModal("Готово", `Импортирани режими: ${Object.keys(parsed).join(", ")}`);
+  nExcelFile.value="";
+});
+function applyNutritionProgram(overwrite=false){
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const prog = nProgramSelect?.value || "";
+  if(!prog) return openModal("Режим","Избери режим.");
+  const nut = nutritionPrograms?.[prog] || {};
+  activeClient.nutrition ||= {};
+  if(overwrite){
+    activeClient.nutrition = JSON.parse(JSON.stringify(nut));
+  }else{
+    for(const [day, arr] of Object.entries(nut)){
+      activeClient.nutrition[day] ||= [];
+      activeClient.nutrition[day].push(...JSON.parse(JSON.stringify(arr)));
+    }
+  }
+  return saveClientPatch({ nutrition: activeClient.nutrition, foodStatus: {} });
+}
+nApplyProgramBtn?.addEventListener("click", ()=>applyNutritionProgram(false));
+nApplyProgramOverwriteBtn?.addEventListener("click", ()=>applyNutritionProgram(true));
+refreshNProgramSelect();
+
+// ---------- Photos ----------
+async function filesToDataUrls(fileList){
+  const out=[];
+  for(const f of Array.from(fileList||[])){
+    const dataUrl = await new Promise((resolve,reject)=>{
+      const fr = new FileReader();
+      fr.onload = ()=> resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(f);
+    });
+    out.push(String(dataUrl));
+  }
+  return out;
+}
+function renderPhotos(){
+  if(!activeClient){ beforeGallery.innerHTML=""; afterGallery.innerHTML=""; return; }
+  const b = activeClient.photos?.before || [];
+  const a = activeClient.photos?.after || [];
+  beforeGallery.innerHTML="";
+  afterGallery.innerHTML="";
+  b.forEach((src, idx)=>{
+    const el=document.createElement("div");
+    el.className="thumb";
+    el.innerHTML = `<img src="${src}" alt="before ${idx+1}"/><button class="thumb-del">×</button>`;
+    el.querySelector("button").addEventListener("click", async ()=>{
+      b.splice(idx,1);
+      await saveClientPatch({ photos: activeClient.photos });
+    });
+    beforeGallery.appendChild(el);
+  });
+  a.forEach((src, idx)=>{
+    const el=document.createElement("div");
+    el.className="thumb";
+    el.innerHTML = `<img src="${src}" alt="after ${idx+1}"/><button class="thumb-del">×</button>`;
+    el.querySelector("button").addEventListener("click", async ()=>{
+      a.splice(idx,1);
+      await saveClientPatch({ photos: activeClient.photos });
+    });
+    afterGallery.appendChild(el);
+  });
+}
+addBeforeBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const urls = await filesToDataUrls(beforeFile.files);
+  if(!urls.length) return;
+  activeClient.photos ||= { before:[], after:[] };
+  activeClient.photos.before ||= [];
+  activeClient.photos.before.push(...urls);
+  await saveClientPatch({ photos: activeClient.photos });
+  beforeFile.value="";
+});
+addAfterBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const urls = await filesToDataUrls(afterFile.files);
+  if(!urls.length) return;
+  activeClient.photos ||= { before:[], after:[] };
+  activeClient.photos.after ||= [];
+  activeClient.photos.after.push(...urls);
+  await saveClientPatch({ photos: activeClient.photos });
+  afterFile.value="";
+});
+clearPhotosBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return;
+  activeClient.photos = { before:[], after:[] };
+  await saveClientPatch({ photos: activeClient.photos });
+});
+
+// ---------- Profile ----------
+function renderProfile(){
+  if(!activeClient){ profilePreview.textContent="Избери клиент."; return; }
+  const p = activeClient.profile || {};
+  goal.value = p.goal || "";
+  weight.value = p.weight || "";
+  height.value = p.height || "";
+  freq.value = p.freq || "";
+  limits.value = p.limits || "";
+
+  payStatus.value = activeClient.paidStatus || "unpaid";
+  packageName.value = activeClient.packageName || "";
+  packagePrice.value = activeClient.packagePrice || "";
+
+  accessCode.value = activeClient.accessCode || activeClient.code || "";
+  const preview = {
+    name: activeClient.name,
+    accessCode: accessCode.value,
+    paidStatus: payStatus.value,
+    packageName: packageName.value,
+    packagePrice: packagePrice.value,
+    profile: p,
+  };
+  profilePreview.textContent = JSON.stringify(preview, null, 2);
+}
+saveProfileBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const patch = {
+    paidStatus: payStatus.value,
+    packageName: packageName.value,
+    packagePrice: packagePrice.value,
+    profile: {
+      goal: goal.value,
+      weight: weight.value==="" ? "" : Number(weight.value),
+      height: height.value==="" ? "" : Number(height.value),
+      freq: freq.value==="" ? "" : Number(freq.value),
+      limits: limits.value,
+    }
+  };
+  await saveClientPatch(patch);
+  openModal("Запазено","Профилът е обновен.");
+});
+genCodeBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
+  const code = uid(6);
+  accessCode.value = code;
+  await saveClientPatch({ accessCode: code });
+  openModal("Код","Генериран е нов код.");
+});
+copyPortalBtn?.addEventListener("click", async ()=>{
+  if(!activeClient) return;
+  const code = activeClient.accessCode || activeClient.code || "";
+  const link = `${location.origin}${location.pathname.replace(/\/[^\/]*$/,"/")}portal.html?code=${encodeURIComponent(code)}`;
+  await copyToClipboard(link);
+  openModal("Копирано", link);
+});
+inviteBtn?.addEventListener("click", async ()=>{
+  if(!activeClient) return;
+  const code = activeClient.accessCode || activeClient.code || "";
+  const link = `${location.origin}${location.pathname.replace(/\/[^\/]*$/,"/")}portal.html?code=${encodeURIComponent(code)}`;
+  openModal("Текст за покана", `Здравей! Това е твоят портал:\n${link}\nКод: ${code}`);
+});
+togglePaidBtn?.addEventListener("click", async ()=>{
+  payStatus.value = (payStatus.value==="paid" ? "unpaid" : "paid");
+  await saveClientPatch({ paidStatus: payStatus.value });
+});
+
+// ---------- Sidebar actions ----------
+exportBtn?.addEventListener("click", async ()=>{
+  if(!activeClientId) return openModal("Експорт","Избери клиент.");
+  const snap = await getDoc(doc(db,"clients",activeClientId));
+  const data = { id:snap.id, ...snap.data() };
+  const blob = new Blob([JSON.stringify(data,null,2)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `client_${data.name||data.id}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+resetBtn?.addEventListener("click", async ()=>{
+  openModal("Нулиране","За безопасност изтриването на клиенти/данни трябва да се прави през Firebase Console или бекенд.");
+});
+notifBtn?.addEventListener("click", ()=>{
+  openModal("Нотификации","Демо UI. За истински push нотификации 24/7 е нужен backend / FCM setup.");
+  notifCount.textContent = "0";
+});
+openPortalBtn?.addEventListener("click", ()=>{
+  // show portal UI without code
+  showPortalUI(true);
+  initPortalFromUrl();
+});
+
+// ---------- Save helper ----------
+async function saveClientPatch(patch){
+  if(!activeClientId) return;
+  await updateDoc(doc(db,"clients",activeClientId), patch);
+}
+
+// ---------- Render all admin panels ----------
+function renderAll(){
+  if(!activeClient) return;
+  renderPlan();
+  renderNutrition();
+  renderPhotos();
+  renderProfile();
+}
+
+// ---------- Portal logic ----------
+backToCoachBtn?.addEventListener("click", ()=>{
+  // back to admin view (still logged in if auth session exists)
+  const url = new URL(location.href);
+  url.searchParams.delete("portal");
+  url.searchParams.delete("code");
+  location.href = url.toString();
+});
+
+function initPortalFromUrl(){
+  const pre = (getParam("code") || "").trim().toUpperCase();
+  if(pre){
+    portalCode.value = pre;
+    portalLoginWithCode(pre);
+  }else{
+    // show login
+    portalLogin.classList.remove("hidden");
+    portalMain.classList.add("hidden");
+  }
+}
+
+portalLoginBtn?.addEventListener("click", ()=>{
+  const code = (portalCode.value||"").trim().toUpperCase();
+  if(!code) return openModal("Код","Въведи код.");
+  portalLoginWithCode(code);
+});
+portalCode?.addEventListener("keydown", (e)=>{ if(e.key==="Enter") portalLoginBtn.click(); });
+
+async function portalLoginWithCode(code){
+  // unsubscribe old
+  if(portalClientUnsub) portalClientUnsub();
+  portalClient = null;
+  const q = query(collection(db,"clients"), where("accessCode","==",code));
+  const snap = await getDocs(q);
+  if(snap.empty){
+    // fallback older field name
+    const q2 = query(collection(db,"clients"), where("code","==",code));
+    const snap2 = await getDocs(q2);
+    if(snap2.empty) return openModal("Грешка","Невалиден код.");
+    portalClientRef = doc(db,"clients", snap2.docs[0].id);
+  }else{
+    portalClientRef = doc(db,"clients", snap.docs[0].id);
+  }
+  portalClientUnsub = onSnapshot(portalClientRef, (s)=>{
+    portalClient = { id:s.id, ...s.data() };
+    portalSub.textContent = portalClient?.name ? `Клиент: ${portalClient.name}` : "Client Portal";
+    portalClientName.textContent = portalClient?.name || "Клиент";
+    renderPortal();
+  });
+  portalLogin.classList.add("hidden");
+  portalMain.classList.remove("hidden");
+  setPTab("pplan");
+}
+
+function renderPortal(){
+  if(!portalClient) return;
+  const day = pDaySelect.value;
+  const w = portalClient.plan?.[day] || [];
+  const n = portalClient.nutrition?.[day] || [];
+
+  // plan list
+  pPlanList.innerHTML="";
+  w.forEach((ex)=>{
+    const el=document.createElement("div");
+    el.className="item";
+    el.innerHTML = `
+      <div>
+        <div class="title">${escapeHtml(ex.name||"")} ${ex.completed?'<span class="pill">✅</span>':""}</div>
+        <div class="meta">
+          ${ex.sets?`<span class="pill">${escapeHtml(ex.sets)} сер.</span>`:""}
+          ${ex.reps?`<span class="pill">${escapeHtml(ex.reps)} повт.</span>`:""}
+          ${ex.rest?`<span class="pill">⏱ ${escapeHtml(ex.rest)}</span>`:""}
+        </div>
+        ${ex.note?`<div class="note">${linkify(escapeHtml(ex.note))}</div>`:""}
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn primary">${ex.completed ? "↩" : "✓"}</button>
+      </div>
+    `;
+    el.querySelector("button").addEventListener("click", async ()=>{
+      ex.completed = !ex.completed;
+      ex.completedAt = ex.completed ? new Date().toLocaleString("bg-BG",{hour12:false}) : null;
+      portalClient.plan[day] = w;
+      await updateDoc(portalClientRef, { plan: portalClient.plan });
+    });
+    pPlanList.appendChild(el);
+  });
+
+  // done hint
+  const ws = portalClient.workoutStatus?.[day];
+  pDayDoneHint.textContent = ws?.done ? `✅ Завършено: ${ws.doneAt || ""}` : "";
+
+  // food list
+  pFoodList.innerHTML="";
+  n.forEach((m)=>{
+    const el=document.createElement("div");
+    el.className="item";
+    el.innerHTML = `
+      <div>
+        <div class="title">${escapeHtml(m.title||"")}${m.time?` <span class="muted" style="font-weight:800">${escapeHtml(m.time)}</span>`:""}</div>
+        <div class="meta">
+          ${m.kcal!=="" && m.kcal!=null ? `<span class="pill">🔥 ${escapeHtml(String(m.kcal))} kcal</span>`:""}
+          ${m.p!=="" && m.p!=null ? `<span class="pill">P ${escapeHtml(String(m.p))}g</span>`:""}
+          ${m.c!=="" && m.c!=null ? `<span class="pill">C ${escapeHtml(String(m.c))}g</span>`:""}
+          ${m.f!=="" && m.f!=null ? `<span class="pill">F ${escapeHtml(String(m.f))}g</span>`:""}
+          ${m.tag?`<span class="pill">#${escapeHtml(m.tag)}</span>`:""}
+        </div>
+        ${m.desc?`<div class="note">${linkify(escapeHtml(m.desc))}</div>`:""}
+      </div>
+    `;
+    pFoodList.appendChild(el);
+  });
+  const fs = portalClient.foodStatus?.[day];
+  pFoodHint.textContent = fs?.done ? `✅ Следвано: ${fs.doneAt || ""}` : "";
+
+  // portal photos
+  renderPortalPhotos();
+}
+
+pDaySelect?.addEventListener("change", renderPortal);
+pFoodDaySelect?.addEventListener("change", renderPortal);
+
+pMarkDayDoneBtn?.addEventListener("click", async ()=>{
+  if(!portalClient) return;
+  const day = pDaySelect.value;
+  portalClient.workoutStatus ||= {};
+  portalClient.workoutStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
+  await updateDoc(portalClientRef, { workoutStatus: portalClient.workoutStatus });
+});
+pFoodDoneBtn?.addEventListener("click", async ()=>{
+  if(!portalClient) return;
+  const day = pFoodDaySelect.value;
+  portalClient.foodStatus ||= {};
+  portalClient.foodStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
+  await updateDoc(portalClientRef, { foodStatus: portalClient.foodStatus });
+});
+
+// portal chat (simple: store in same subcollection)
+function renderPortalChat(items){
+  pChatBox.innerHTML = "";
+  items.forEach(m=>{
+    const el=document.createElement("div");
+    el.className = "msg " + (m.from==="client" ? "me" : "them");
+    el.innerHTML = `
+      <div class="msg-meta muted">${escapeHtml(m.from||"")} • ${m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString("bg-BG",{hour12:false}) : ""}</div>
+      <div class="msg-text">${linkify(escapeHtml(m.text||""))}</div>
+    `;
+    pChatBox.appendChild(el);
+  });
+  pChatBox.scrollTop = pChatBox.scrollHeight;
+}
+let portalChatUnsub = null;
+function ensurePortalChatListener(){
+  if(!portalClientRef) return;
+  if(portalChatUnsub) return;
+  const chatQ = query(collection(db,"clients",portalClientRef.id,"chat"), orderBy("createdAt","asc"), limit(200));
+  portalChatUnsub = onSnapshot(chatQ, (snap)=>{
+    renderPortalChat(snap.docs.map(d=>({id:d.id, ...d.data()})));
+  });
+}
+pSendMsgBtn?.addEventListener("click", async ()=>{
+  if(!portalClientRef) return;
+  const text = (pMsgText.value||"").trim();
+  if(!text) return;
+  await addDoc(collection(db,"clients",portalClientRef.id,"chat"), {
+    from: "client",
+    text,
+    createdAt: serverTimestamp()
+  });
+  pMsgText.value="";
+  ensurePortalChatListener();
+});
+pMsgText?.addEventListener("keydown",(e)=>{ if(e.key==="Enter") pSendMsgBtn.click(); });
+ensurePortalChatListener();
+
+// portal photos upload (optional)
+async function renderPortalPhotos(){
+  if(!portalClient) return;
+  const b = portalClient.photos?.before || [];
+  const a = portalClient.photos?.after || [];
+  pBeforeGallery.innerHTML="";
+  pAfterGallery.innerHTML="";
+  b.forEach((src)=>{
+    const el=document.createElement("div"); el.className="thumb";
+    el.innerHTML = `<img src="${src}" alt="before"/>`;
+    pBeforeGallery.appendChild(el);
+  });
+  a.forEach((src)=>{
+    const el=document.createElement("div"); el.className="thumb";
+    el.innerHTML = `<img src="${src}" alt="after"/>`;
+    pAfterGallery.appendChild(el);
+  });
+}
+pAddBeforeBtn?.addEventListener("click", async ()=>{
+  if(!portalClientRef) return;
+  const urls = await filesToDataUrls(pBeforeFile.files);
+  if(!urls.length) return;
+  portalClient.photos ||= { before:[], after:[] };
+  portalClient.photos.before ||= [];
+  portalClient.photos.before.push(...urls);
+  await updateDoc(portalClientRef, { photos: portalClient.photos });
+  pBeforeFile.value="";
+});
+pAddAfterBtn?.addEventListener("click", async ()=>{
+  if(!portalClientRef) return;
+  const urls = await filesToDataUrls(pAfterFile.files);
+  if(!urls.length) return;
+  portalClient.photos ||= { before:[], after:[] };
+  portalClient.photos.after ||= [];
+  portalClient.photos.after.push(...urls);
+  await updateDoc(portalClientRef, { photos: portalClient.photos });
+  pAfterFile.value="";
+});
+
+// ---------- Boot ----------
+function safeInitSelectDefaults(){
+  // set day selects to today
+  const days = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
+  const map = {1:"Понеделник",2:"Вторник",3:"Сряда",4:"Четвъртък",5:"Петък",6:"Събота",0:"Неделя"};
+  const today = map[new Date().getDay()] || "Понеделник";
+  [daySelect, nDaySelect, pDaySelect, pFoodDaySelect].forEach(sel=>{
+    if(!sel) return;
+    if(days.includes(today)) sel.value = today;
+  });
+}
+safeInitSelectDefaults();

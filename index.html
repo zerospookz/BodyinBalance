@@ -205,6 +205,28 @@
         <div class="grid">
           <div class="card">
             <div class="card-title">Добави хранене</div>
+            <div class="divider"></div>
+
+            <div class="card-title">Импорт хранене от Excel (Admin)</div>
+            <div class="form">
+              <label>Импорт от Excel (.xlsx)</label>
+              <input id="nExcelFile" type="file" accept=".xlsx" />
+              <div class="row2">
+                <button id="nImportExcelBtn" class="btn primary">Импортирай</button>
+                <button id="nOpenExcelFormatBtn" class="btn ghost">Формат</button>
+              </div>
+
+              <label>Избери режим</label>
+              <select id="nProgramSelect" class="select select-modern">
+                <option value="">— няма импортирани —</option>
+              </select>
+
+              <div class="row2">
+                <button id="nApplyProgramBtn" class="btn primary">Приложи към клиента</button>
+                <button id="nApplyProgramOverwriteBtn" class="btn ghost">Приложи (презапиши)</button>
+              </div>
+            </div>
+
             <div class="form">
               <label>Хранене (напр. Закуска/Обяд/Вечеря/Снак)</label>
               <input id="mealTitle" type="text" placeholder="напр. Обяд" />
