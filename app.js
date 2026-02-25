@@ -6,6 +6,9 @@ import {
   getFirestore, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs,
   query, where, orderBy, serverTimestamp, onSnapshot, limit
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getStorage, ref as sRef, uploadBytes, getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 /**
@@ -18,6 +21,7 @@ import { firebaseConfig } from "./firebase-config.js";
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // ---------- Small helpers ----------
 const $ = (id) => document.getElementById(id);
@@ -250,14 +254,6 @@ loginBtn?.addEventListener("click", async ()=>{
   }
 });
 onAuthStateChanged(auth, (user)=>{
-  const portalMode = getParam("portal")==="1";
-  if(portalMode){
-    // portal does NOT require auth
-    showPortalUI(true);
-    showAdminUI(false);
-    initPortalFromUrl();
-    return;
-  }
   if(user){
     showLogin(false);
     showAdminUI(true);
@@ -560,6 +556,7 @@ openExcelFormatBtn?.addEventListener("click", ()=>{
 Day може да е: Понеделник или Mon/Monday или 1..7`);
 });
 importExcelBtn?.addEventListener("click", async ()=>{
+  try{
   if(!excelFile.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
   const rows = await sheetToRows(excelFile.files[0]);
   const parsed = parseWorkoutPrograms(rows);
@@ -568,6 +565,7 @@ importExcelBtn?.addEventListener("click", async ()=>{
   refreshProgramSelect();
   openModal("Готово", `Импортирани програми: ${Object.keys(parsed).join(", ")}`);
   excelFile.value="";
+  }catch(e){ console.error(e); openModal("Грешка", e?.message || String(e)); }
 });
 function applyWorkoutProgram(overwrite=false){
   if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
@@ -732,6 +730,7 @@ nOpenExcelFormatBtn?.addEventListener("click", ()=>{
 Колони (BG): Програма | Ден | Хранене | Описание | Ккал | Протеин | Въглехидрати | Мазнини | Час | Таг | Админ бележка`);
 });
 nImportExcelBtn?.addEventListener("click", async ()=>{
+  try{
   if(!nExcelFile?.files?.length) return openModal("Импорт", "Избери .xlsx файл.");
   const rows = await sheetToRows(nExcelFile.files[0]);
   const parsed = parseNutritionPrograms(rows);
@@ -740,6 +739,7 @@ nImportExcelBtn?.addEventListener("click", async ()=>{
   refreshNProgramSelect();
   openModal("Готово", `Импортирани режими: ${Object.keys(parsed).join(", ")}`);
   nExcelFile.value="";
+  }catch(e){ console.error(e); openModal("Грешка", e?.message || String(e)); }
 });
 function applyNutritionProgram(overwrite=false){
   if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
@@ -763,6 +763,7 @@ refreshNProgramSelect();
 
 // ---------- Photos ----------
 async function filesToDataUrls(fileList){
+  // fallback for very small images; preferred path uses Firebase Storage
   const out=[];
   for(const f of Array.from(fileList||[])){
     const dataUrl = await new Promise((resolve,reject)=>{
@@ -774,6 +775,20 @@ async function filesToDataUrls(fileList){
     out.push(String(dataUrl));
   }
   return out;
+}
+
+async function uploadImagesToStorage(clientId, kind, fileList){
+  // kind: "before" | "after"
+  const files = Array.from(fileList||[]);
+  if(!files.length) return [];
+  const urls = [];
+  for(const f of files){
+    const path = `clients/${clientId}/photos/${kind}/${Date.now()}_${Math.random().toString(16).slice(2)}_${f.name}`.replace(/\s+/g,"_");
+    const r = sRef(storage, path);
+    await uploadBytes(r, f, { contentType: f.type || "image/jpeg" });
+    urls.push(await getDownloadURL(r));
+  }
+  return urls;
 }
 function renderPhotos(){
   if(!activeClient){ beforeGallery.innerHTML=""; afterGallery.innerHTML=""; return; }
@@ -804,23 +819,35 @@ function renderPhotos(){
 }
 addBeforeBtn?.addEventListener("click", async ()=>{
   if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
-  const urls = await filesToDataUrls(beforeFile.files);
-  if(!urls.length) return;
-  activeClient.photos ||= { before:[], after:[] };
-  activeClient.photos.before ||= [];
-  activeClient.photos.before.push(...urls);
-  await saveClientPatch({ photos: activeClient.photos });
-  beforeFile.value="";
+  try{
+    if(!beforeFile.files?.length) return openModal("Снимки","Избери снимки (Преди).");
+    const urls = await uploadImagesToStorage(activeClientId, "before", beforeFile.files);
+    activeClient.photos ||= { before:[], after:[] };
+    activeClient.photos.before ||= [];
+    activeClient.photos.before.push(...urls);
+    await saveClientPatch({ photos: activeClient.photos });
+    beforeFile.value="";
+    openModal("Готово", `Качени снимки: ${urls.length}`);
+  }catch(e){
+    console.error(e);
+    openModal("Грешка при качване", e?.message || String(e));
+  }
 });
 addAfterBtn?.addEventListener("click", async ()=>{
   if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
-  const urls = await filesToDataUrls(afterFile.files);
-  if(!urls.length) return;
-  activeClient.photos ||= { before:[], after:[] };
-  activeClient.photos.after ||= [];
-  activeClient.photos.after.push(...urls);
-  await saveClientPatch({ photos: activeClient.photos });
-  afterFile.value="";
+  try{
+    if(!afterFile.files?.length) return openModal("Снимки","Избери снимки (След).");
+    const urls = await uploadImagesToStorage(activeClientId, "after", afterFile.files);
+    activeClient.photos ||= { before:[], after:[] };
+    activeClient.photos.after ||= [];
+    activeClient.photos.after.push(...urls);
+    await saveClientPatch({ photos: activeClient.photos });
+    afterFile.value="";
+    openModal("Готово", `Качени снимки: ${urls.length}`);
+  }catch(e){
+    console.error(e);
+    openModal("Грешка при качване", e?.message || String(e));
+  }
 });
 clearPhotosBtn?.addEventListener("click", async ()=>{
   if(!activeClientId) return;
@@ -1130,23 +1157,35 @@ async function renderPortalPhotos(){
 }
 pAddBeforeBtn?.addEventListener("click", async ()=>{
   if(!portalClientRef) return;
-  const urls = await filesToDataUrls(pBeforeFile.files);
-  if(!urls.length) return;
-  portalClient.photos ||= { before:[], after:[] };
-  portalClient.photos.before ||= [];
-  portalClient.photos.before.push(...urls);
-  await updateDoc(portalClientRef, { photos: portalClient.photos });
-  pBeforeFile.value="";
+  try{
+    if(!pBeforeFile.files?.length) return openModal("Снимки","Избери снимки (Преди).");
+    const urls = await uploadImagesToStorage(portalClientRef.id, "before", pBeforeFile.files);
+    portalClient.photos ||= { before:[], after:[] };
+    portalClient.photos.before ||= [];
+    portalClient.photos.before.push(...urls);
+    await updateDoc(portalClientRef, { photos: portalClient.photos });
+    pBeforeFile.value="";
+    openModal("Готово", `Качени снимки: ${urls.length}`);
+  }catch(e){
+    console.error(e);
+    openModal("Грешка при качване", e?.message || String(e));
+  }
 });
 pAddAfterBtn?.addEventListener("click", async ()=>{
   if(!portalClientRef) return;
-  const urls = await filesToDataUrls(pAfterFile.files);
-  if(!urls.length) return;
-  portalClient.photos ||= { before:[], after:[] };
-  portalClient.photos.after ||= [];
-  portalClient.photos.after.push(...urls);
-  await updateDoc(portalClientRef, { photos: portalClient.photos });
-  pAfterFile.value="";
+  try{
+    if(!pAfterFile.files?.length) return openModal("Снимки","Избери снимки (След).");
+    const urls = await uploadImagesToStorage(portalClientRef.id, "after", pAfterFile.files);
+    portalClient.photos ||= { before:[], after:[] };
+    portalClient.photos.after ||= [];
+    portalClient.photos.after.push(...urls);
+    await updateDoc(portalClientRef, { photos: portalClient.photos });
+    pAfterFile.value="";
+    openModal("Готово", `Качени снимки: ${urls.length}`);
+  }catch(e){
+    console.error(e);
+    openModal("Грешка при качване", e?.message || String(e));
+  }
 });
 
 // ---------- Boot ----------
