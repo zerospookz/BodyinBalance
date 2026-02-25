@@ -595,7 +595,7 @@ function refreshProgramSelect(){
     programSelect.appendChild(o);
   });
   if(workoutImportStatus){
-    workoutImportStatus.textContent = keys.length ? `Импортирани програми: ${keys.length}` : `Няма импортирани програми.`;
+    workoutImportStatus.textContent = keys.length ? `Импортирани програми: ${''}` : "Няма импортирани програми.";
   }
 });
 }
