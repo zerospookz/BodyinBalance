@@ -3,58 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Portal • BodyInBalance</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Client Portal</title>
+  <meta name="robots" content="noindex" />
+  <script>
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code") || "";
+    const target = `index.html?portal=1${code ? `&code=${encodeURIComponent(code)}` : ""}`;
+    window.location.replace(target);
+  </script>
 </head>
-<body>
-  <div class="wrap">
-    <div class="panel">
-      <div class="top">
-        <div class="brand">
-          <div class="logo">CL</div>
-          <div>
-            <h1>Client Portal</h1>
-            <div id="clientSub" class="sub">Вход с код</div>
-          </div>
-        </div>
-        <div class="row">
-          <button class="btn" onclick="location.href='index.html'">Начало</button>
-        </div>
-      </div>
-
-      <div id="loginCard" class="card" style="margin-top:14px">
-        <h2>Вход</h2>
-        <div class="row">
-          <input id="code" placeholder="Код за достъп" />
-          <button class="btn primary" id="loginBtn">Вход</button>
-        </div>
-        <div id="err" class="muted" style="margin-top:10px;color:#ff6b6b;display:none"></div>
-      </div>
-
-      <div id="main" class="grid" style="display:none;margin-top:14px">
-        <div class="card">
-          <h2>Тренировки</h2>
-          <div class="row">
-            <select id="daySel">
-              <option>Понеделник</option><option>Вторник</option><option>Сряда</option>
-              <option>Четвъртък</option><option>Петък</option><option>Събота</option><option>Неделя</option>
-            </select>
-            <button class="btn primary" id="markWorkoutBtn">Завърших ✅</button>
-          </div>
-          <div class="list" id="workoutList"></div>
-        </div>
-
-        <div class="card">
-          <h2>Хранене</h2>
-          <div class="row">
-            <button class="btn primary" id="markFoodBtn">Следвам ✅</button>
-          </div>
-          <div class="list" id="foodList"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="portal.js"></script>
+<body style="background:#0f1624;color:white;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">
+  Пренасочване към портала...
 </body>
 </html>

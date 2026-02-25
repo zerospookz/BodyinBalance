@@ -3,56 +3,527 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>BodyInBalance • Portal</title>
+  <title>Coach + Client Portal (Demo)</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <div class="panel">
+  <!-- LOGIN (Firebase Auth) -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-title">Admin</div>
+      <div class="login-sub muted">Вход с имейл и парола</div>
+      <div class="form" style="margin-top:14px;">
+        <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
+        <input id="loginPass" type="password" placeholder="Парола" autocomplete="current-password" />
+        <button id="loginBtn" class="btn primary">Вход</button>
+        <div id="loginErr" class="hint" style="color: rgba(255,107,107,.95);"></div>
+      </div>
+      <div class="hint muted" style="margin-top:10px;">* Client Portal работи без login чрез /portal.html?code=КОД</div>
+    </div>
+  </div>
+
+  <div id="coachApp" class="app">
+    <aside class="sidebar">
       <div class="top">
         <div class="brand">
-          <div class="logo">BB</div>
+          <div class="logo">TF</div>
           <div>
-            <h1>BodyInBalance</h1>
-            <div class="sub">Тренировки • Хранене • Снимки • Чат (Firebase Sync)</div>
+            <div class="brand-name">Coach Panel</div>
+            <div class="brand-sub">Demo • тренировки + хранене • portal • excel</div>
           </div>
         </div>
-        <div class="muted" style="font-size:12px">Данните се синхронизират между устройства</div>
+
+        <div class="add-client">
+          <input id="clientName" type="text" placeholder="Име на клиент (напр. Иван)" />
+          <button id="addClientBtn" class="btn primary">+ Добави</button>
+        </div>
+
+        <div class="portal-bar">
+          <button id="openPortalBtn" class="btn ghost">Отвори Client Portal</button>
+        </div>
       </div>
 
-      <div class="grid">
-        <div class="card">
-          <h2>Клиент вход</h2>
-          <div class="muted">Въведи код и влез директно в портала.</div>
-          <div class="row" style="margin-top:10px">
-            <input id="code" placeholder="Код (напр. AB12CD)" />
-            <button class="btn primary" id="go">Вход</button>
+      <div class="clients">
+        <div class="section-title">Клиенти</div>
+        <div id="clientsList" class="clients-list"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="notifBtn" class="btn primary">Нотификации <span id="notifCount" class="pill">0</span></button>
+        <button id="exportBtn" class="btn ghost">Експорт (JSON)</button>
+        <button id="resetBtn" class="btn danger">Нулирай данните</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="main-top">
+        <div>
+          <h1 id="activeTitle">Избери клиент</h1>
+          <div id="activeMeta" class="muted">Добави клиент отляво и кликни върху него.</div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="chat">Чат</button>
+          <button class="tab" data-tab="plan">Тренировки</button>
+          <button class="tab" data-tab="nutrition">Хранене</button>
+          <button class="tab" data-tab="photos">Снимки</button>
+          <button class="tab" data-tab="profile">Профил</button>
+        </div>
+      </div>
+
+      <!-- CHAT -->
+      <section id="tab-chat" class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Чат / Бележки</div>
+          <div class="panel-actions">
+            <button id="clearChatBtn" class="btn ghost">Изчисти чата</button>
           </div>
-          <div class="muted" style="margin-top:10px;font-size:12px">Линк формат: <b>/portal.html?code=AB12CD</b></div>
         </div>
 
-        <div class="card">
-          <h2>Admin</h2>
-          <div class="muted">Вход с email/парола (Firebase Auth)</div>
-          <div class="row" style="margin-top:10px">
-            <button class="btn primary" onclick="location.href='admin.html'">Отвори Admin</button>
-            <button class="btn" onclick="location.href='portal.html'">Отвори Portal</button>
-          </div>
-          <div class="muted" style="margin-top:10px;font-size:12px">
-            Настрой Firebase config в <b>firebase-config.js</b>.
+        <div id="chatBox" class="chat-box"></div>
+
+        <div class="composer">
+          <select id="msgFrom" class="select select-modern">
+            <option value="coach">Аз (треньор)</option>
+            <option value="client">Клиент (тест)</option>
+          </select>
+          <input id="msgText" type="text" placeholder="Напиши съобщение..." />
+          <button id="sendMsgBtn" class="btn primary">Изпрати</button>
+        </div>
+
+        <div class="hint muted">*Демо: LocalStorage. За истински нотификации 24/7 → нужен backend.</div>
+      </section>
+
+      <!-- TRAINING PLAN -->
+      <section id="tab-plan" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Тренировъчен план (Admin)</div>
+          <div class="panel-actions">
+            <select id="daySelect" class="select select-modern">
+              <option value="Понеделник">Понеделник</option>
+              <option value="Вторник">Вторник</option>
+              <option value="Сряда">Сряда</option>
+              <option value="Четвъртък">Четвъртък</option>
+              <option value="Петък">Петък</option>
+              <option value="Събота">Събота</option>
+              <option value="Неделя">Неделя</option>
+            </select>
+            <button id="clearDayBtn" class="btn ghost">Изчисти деня</button>
           </div>
         </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Добави упражнение</div>
+
+            <div class="form">
+              <label>Упражнение</label>
+              <input id="exName" type="text" placeholder="напр. Клек" />
+
+              <div class="row">
+                <div>
+                  <label>Серии</label>
+                  <input id="exSets" type="number" min="1" value="3" />
+                </div>
+                <div>
+                  <label>Повторения</label>
+                  <input id="exReps" type="text" value="8-10" />
+                </div>
+                <div>
+                  <label>Почивка</label>
+                  <input id="exRest" type="text" value="90s" />
+                </div>
+              </div>
+
+              <label>Бележка (видима за клиента)</label>
+              <input id="exNote" type="text" placeholder="линк към видео: https://..." />
+
+              <label>Admin бележка (скрита)</label>
+              <input id="exAdminNote" type="text" placeholder="само за теб" />
+
+              <button id="addExBtn" class="btn primary">+ Добави към деня</button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="card-title">Excel програми (само Admin)</div>
+            <div class="form">
+              <label>Импорт от Excel (.xlsx)</label>
+              <input id="excelFile" type="file" accept=".xlsx" />
+              <div class="row2">
+                <button id="importExcelBtn" class="btn primary">Импортирай</button>
+                <button id="openExcelFormatBtn" class="btn ghost">Формат</button>
+              </div>
+
+              <label>Избери програма</label>
+              <select id="programSelect" class="select select-modern">
+                <option value="">— няма импортирани —</option>
+              </select>
+
+              <div class="row2">
+                <button id="applyProgramBtn" class="btn primary">Приложи към клиента</button>
+                <button id="applyProgramOverwriteBtn" class="btn ghost">Приложи (презапиши)</button>
+              </div>
+
+              <div class="hint muted">Клиентът не вижда, че е preset.</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">
+              План за: <span id="planDayTitle">Понеделник</span>
+            </div>
+
+            <div id="planList" class="plan-list"></div>
+
+            <div class="card-footer footer-split">
+              <button id="markDayDoneAdminBtn" class="btn primary">Маркирай деня ✅</button>
+              <button id="copyPlanBtn" class="btn ghost">Копирай плана</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- NUTRITION -->
+      <section id="tab-nutrition" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Хранителен режим (Admin)</div>
+          <div class="panel-actions">
+            <select id="nDaySelect" class="select select-modern">
+              <option value="Понеделник">Понеделник</option>
+              <option value="Вторник">Вторник</option>
+              <option value="Сряда">Сряда</option>
+              <option value="Четвъртък">Четвъртък</option>
+              <option value="Петък">Петък</option>
+              <option value="Събота">Събота</option>
+              <option value="Неделя">Неделя</option>
+            </select>
+            <button id="nClearDayBtn" class="btn ghost">Изчисти деня</button>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Добави хранене</div>
+            <div class="form">
+              <label>Хранене (напр. Закуска/Обяд/Вечеря/Снак)</label>
+              <input id="mealTitle" type="text" placeholder="напр. Обяд" />
+
+              <label>Описание</label>
+              <textarea id="mealDesc" rows="4" placeholder="напр. 150г пилешко, 200г ориз, салата... (можеш да сложиш линк https://...)"></textarea>
+
+              <div class="row">
+                <div>
+                  <label>Ккал</label>
+                  <input id="mealKcal" type="number" min="0" placeholder="напр. 650" />
+                </div>
+                <div>
+                  <label>Протеин (g)</label>
+                  <input id="mealP" type="number" min="0" placeholder="напр. 45" />
+                </div>
+                <div>
+                  <label>Въглех. (g)</label>
+                  <input id="mealC" type="number" min="0" placeholder="напр. 80" />
+                </div>
+              </div>
+
+              <div class="row">
+                <div>
+                  <label>Мазнини (g)</label>
+                  <input id="mealF" type="number" min="0" placeholder="напр. 18" />
+                </div>
+                <div>
+                  <label>Час (по избор)</label>
+                  <input id="mealTime" type="text" placeholder="напр. 13:30" />
+                </div>
+                <div>
+                  <label>Таг (по избор)</label>
+                  <input id="mealTag" type="text" placeholder="напр. high-carb" />
+                </div>
+              </div>
+
+              <label>Admin бележка (скрита)</label>
+              <input id="mealAdminNote" type="text" placeholder="само за теб" />
+
+              <button id="addMealBtn" class="btn primary">+ Добави хранене</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Режим за деня</div>
+            <div id="nutritionList" class="plan-list"></div>
+            <div class="card-footer">
+              <button id="copyNutritionBtn" class="btn ghost">Копирай режима</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PHOTOS -->
+      <section id="tab-photos" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Снимки “Преди / След”</div>
+          <div class="panel-actions">
+            <button id="clearPhotosBtn" class="btn ghost">Изчисти всички</button>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Качи “Преди” (Admin)</div>
+            <div class="form">
+              <input id="beforeFile" type="file" accept="image/*" multiple />
+              <button id="addBeforeBtn" class="btn primary">Добави “Преди”</button>
+              <div class="hint muted">*Demo: качвай по-малки снимки (LocalStorage лимит).</div>
+            </div>
+
+            <div class="mini-title">Галерия “Преди”</div>
+            <div id="beforeGallery" class="gallery"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Качи “След” (Admin)</div>
+            <div class="form">
+              <input id="afterFile" type="file" accept="image/*" multiple />
+              <button id="addAfterBtn" class="btn primary">Добави “След”</button>
+            </div>
+
+            <div class="mini-title">Галерия “След”</div>
+            <div id="afterGallery" class="gallery"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <section id="tab-profile" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Профил (Admin)</div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Информация + плащане</div>
+
+            <div class="form">
+              <label>Цел</label>
+              <input id="goal" type="text" />
+
+              <div class="row">
+                <div>
+                  <label>Тегло (кг)</label>
+                  <input id="weight" type="number" step="0.1" />
+                </div>
+                <div>
+                  <label>Ръст (см)</label>
+                  <input id="height" type="number" />
+                </div>
+                <div>
+                  <label>Трен./седм.</label>
+                  <input id="freq" type="number" min="1" max="7" />
+                </div>
+              </div>
+
+              <label>Ограничения/травми</label>
+              <input id="limits" type="text" />
+
+              <button id="saveProfileBtn" class="btn primary">Запази профил</button>
+
+              <div class="row" style="margin-top:10px;">
+                <div>
+                  <label>Статус</label>
+                  <select id="payStatus" class="select select-modern">
+                    <option value="unpaid">Неплатено</option>
+                    <option value="paid">Платено</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Пакет</label>
+                  <input id="packageName" type="text" placeholder="напр. 8 седмици" />
+                </div>
+                <div>
+                  <label>Цена</label>
+                  <input id="packagePrice" type="text" placeholder="напр. 120 лв" />
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="card-title">Client Portal</div>
+              <div class="row2">
+                <button id="genCodeBtn" class="btn primary">Генерирай код</button>
+                <button id="copyPortalBtn" class="btn ghost">Копирай Portal линк</button>
+              </div>
+
+              <div class="form">
+                <label>Код за достъп</label>
+                <input id="accessCode" type="text" placeholder="ще се генерира" />
+              </div>
+
+              <div style="display:flex; gap:10px; margin-top:10px;">
+                <button id="inviteBtn" class="btn ghost">Покани клиента (текст)</button>
+                <button id="togglePaidBtn" class="btn primary">Маркирай като Платено</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Бърз преглед</div>
+            <pre id="profilePreview" class="preview muted">Избери клиент.</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- CLIENT PORTAL -->
+  <div id="clientPortal" class="portal hidden">
+    <div class="portal-top">
+      <div class="portal-brand">
+        <div class="logo">TF</div>
+        <div>
+          <div class="brand-name">Client Portal</div>
+          <div id="portalSub" class="brand-sub">Вход с код</div>
+        </div>
+      </div>
+      <div class="portal-actions">
+        <button id="backToCoachBtn" class="btn ghost">Назад към Admin</button>
+      </div>
+    </div>
+
+    <div id="portalLogin" class="panel portal-login">
+      <div class="panel-header">
+        <div class="panel-title">Въведи код за достъп</div>
+      </div>
+      <div class="form">
+        <input id="portalCode" type="text" placeholder="напр. AB12CD" />
+        <button id="portalLoginBtn" class="btn primary">Вход</button>
+        <div class="hint muted">*Демо: локален код. За реално → backend.</div>
+      </div>
+    </div>
+
+    <div id="portalMain" class="portal-main hidden">
+      <div class="main-top">
+        <div>
+          <h1 id="portalClientName">Клиент</h1>
+          <div class="muted">План • Хранене • Чат • Снимки</div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-ptab="pplan">Тренировки</button>
+          <button class="tab" data-ptab="pfood">Хранене</button>
+          <button class="tab" data-ptab="pchat">Чат</button>
+          <button class="tab" data-ptab="pphotos">Снимки</button>
+        </div>
+      </div>
+
+      <!-- Portal Training -->
+      <section id="ptab-pplan" class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Твоят план</div>
+          <div class="panel-actions">
+            <select id="pDaySelect" class="select select-modern">
+              <option value="Понеделник">Понеделник</option>
+              <option value="Вторник">Вторник</option>
+              <option value="Сряда">Сряда</option>
+              <option value="Четвъртък">Четвъртък</option>
+              <option value="Петък">Петък</option>
+              <option value="Събота">Събота</option>
+              <option value="Неделя">Неделя</option>
+            </select>
+            
+          </div>
+        </div>
+        <div id="pPlanList" class="plan-list"></div>
+        <div id="pDayDoneHint" class="hint muted"></div>
+        <div class="sticky-bar">
+          <button id="pMarkDayDoneBtn" class="btn primary btn-lg">Завърших тренировката ✅</button>
+        </div>
+      </section>
+
+      <!-- Portal Nutrition -->
+      <section id="ptab-pfood" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Хранене за деня</div>
+          <div class="panel-actions">
+            <select id="pFoodDaySelect" class="select select-modern">
+              <option value="Понеделник">Понеделник</option>
+              <option value="Вторник">Вторник</option>
+              <option value="Сряда">Сряда</option>
+              <option value="Четвъртък">Четвъртък</option>
+              <option value="Петък">Петък</option>
+              <option value="Събота">Събота</option>
+              <option value="Неделя">Неделя</option>
+            </select>
+            
+          </div>
+        </div>
+        <div id="pFoodList" class="plan-list"></div>
+        <div id="pFoodHint" class="hint muted"></div>
+        <div class="sticky-bar">
+          <button id="pFoodDoneBtn" class="btn primary btn-lg">Следвам режима ✅</button>
+        </div>
+      </section>
+
+      <!-- Portal Chat -->
+      <section id="ptab-pchat" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Чат с треньора</div>
+        </div>
+
+        <div id="pChatBox" class="chat-box"></div>
+
+        <div class="composer">
+          <div class="select muted" style="display:flex;align-items:center;justify-content:center;">Клиент</div>
+          <input id="pMsgText" type="text" placeholder="Напиши съобщение..." />
+          <button id="pSendMsgBtn" class="btn primary">Изпрати</button>
+        </div>
+      </section>
+
+      <!-- Portal Photos -->
+      <section id="ptab-pphotos" class="panel hidden">
+        <div class="panel-header">
+          <div class="panel-title">Снимки “Преди / След”</div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Качи “Преди”</div>
+            <div class="form">
+              <input id="pBeforeFile" type="file" accept="image/*" multiple />
+              <button id="pAddBeforeBtn" class="btn primary">Добави “Преди”</button>
+            </div>
+            <div class="mini-title">Галерия “Преди”</div>
+            <div id="pBeforeGallery" class="gallery"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Качи “След”</div>
+            <div class="form">
+              <input id="pAfterFile" type="file" accept="image/*" multiple />
+              <button id="pAddAfterBtn" class="btn primary">Добави “След”</button>
+            </div>
+            <div class="mini-title">Галерия “След”</div>
+            <div id="pAfterGallery" class="gallery"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title" id="modalTitle">Modal</div>
+        <button id="closeModal" class="icon-btn" aria-label="Затвори">✕</button>
+      </div>
+      <textarea id="modalText" class="modal-text" readonly></textarea>
+      <div class="modal-actions">
+        <button id="copyModalBtn" class="btn primary">Копирай</button>
+        <button id="closeModal2" class="btn ghost">Затвори</button>
       </div>
     </div>
   </div>
 
-<script>
-  const codeEl = document.getElementById('code');
-  document.getElementById('go').onclick = ()=>{
-    const c = (codeEl.value||'').trim().toUpperCase();
-    location.href = c ? `portal.html?code=${encodeURIComponent(c)}` : 'portal.html';
-  };
-  codeEl.addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('go').click(); });
-</script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
