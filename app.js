@@ -1,9 +1,3 @@
-
-document.addEventListener("DOMContentLoaded", () => {
-  initApp();
-});
-
-async function initApp() {
 import {
   initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"; import {   getAuth,
   onAuthStateChanged,
@@ -1375,4 +1369,19 @@ function safeInitSelectDefaults(){
   });
 }
 safeInitSelectDefaults();
+
+function attachUIListeners(){
+  const buttons = document.querySelectorAll("button");
+  buttons.forEach(btn=>{
+    if(!btn.dataset.bound){
+      btn.dataset.bound="1";
+      // keep existing inline listeners intact
+    }
+  });
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  if (typeof attachUIListeners === "function") {
+    attachUIListeners();
+  }
+});
