@@ -595,17 +595,14 @@ function refreshProgramSelect(){
     programSelect.appendChild(o);
   });
   if(workoutImportStatus){
-    workoutImportStatus.textContent = keys.length ? `Импортирани програми: ${''}` : "Няма импортирани програми.";
+    workoutImportStatus.textContent = keys.length ? `Импортирани програми: ${keys.length}` : "Няма импортирани програми.";
   }
-});
+
 }
 openExcelFormatBtn?.addEventListener("click", ()=>{
   openModal("Формат (тренировки)",
-    "Колони (EN): Program | Day | Exercise | Sets | Reps | Rest | Note
-" +
-    "Колони (BG): Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка
-
-" +
+    "Колони (EN): Program | Day | Exercise | Sets | Reps | Rest | Note\n" +
+    "Колони (BG): Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка\n\n" +
     "Day може да е: Понеделник или Mon/Monday или 1..7"
   );
 });
