@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
+  getAuth, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs,
@@ -57,6 +57,11 @@ function normalizeDay(v){
 }
 function openModal(title, body){
   alert(`${title}\n\n${body}`);
+}
+function showErr(where, e){
+  const msg = e?.message || String(e||'Грешка');
+  console.error(where, e);
+  openModal('Грешка: ' + where, msg);
 }
 function getParam(k){ return new URLSearchParams(location.search).get(k); }
 async function copyToClipboard(text){
@@ -253,7 +258,25 @@ loginBtn?.addEventListener("click", async ()=>{
     loginErr.textContent = e?.message || "Грешка при вход.";
   }
 });
-onAuthStateChanged(auth, (user)=>{
+
+onAuthStateChanged(auth, async (user)=>{
+  const portalMode = getParam("portal")==="1";
+  if(portalMode){
+    // Portal should work without exposing admin login; use anonymous auth so Firestore rules can require auth.
+    try{
+      if(!auth.currentUser){
+        await signInAnonymously(auth);
+      }
+    }catch(e){
+      showErr("Anonymous auth", e);
+    }
+    showPortalUI(true);
+    showAdminUI(false);
+    initPortalFromUrl();
+    return;
+  }
+
+  // Admin mode (default): always show login first unless authenticated
   if(user){
     showLogin(false);
     showAdminUI(true);
@@ -340,7 +363,7 @@ addClientBtn?.addEventListener("click", async ()=>{
   const name = (clientName.value||"").trim();
   if(!name) return;
   const accessCode = uid(6);
-  await addDoc(collection(db,"clients"), {
+  try{ await addDoc(collection(db,"clients"), {
     name,
     accessCode,
     createdAt: serverTimestamp(),
@@ -353,7 +376,7 @@ addClientBtn?.addEventListener("click", async ()=>{
     workoutStatus: {},
     foodStatus: {},
     photos: { before:[], after:[] },
-  });
+  }); }catch(e){ showErr('Добавяне на клиент', e); }
   clientName.value="";
 });
 
@@ -427,12 +450,12 @@ function renderPlan(){
     el.querySelector('[data-act="edit"]').addEventListener("click", async ()=>{
       const name = prompt("Упражнение", ex.name||"") ?? ex.name;
       ex.name = (name||"").trim() || ex.name;
-      await saveClientPatch({ plan: activeClient.plan });
+      await saveClientPatch({ plan: activeClient.plan }); }catch(e){ showErr('Portal update', e);} 
     });
     el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
       const i = list.findIndex(x=>x.id===ex.id);
       if(i>=0) list.splice(i,1);
-      await saveClientPatch({ plan: activeClient.plan });
+      await saveClientPatch({ plan: activeClient.plan }); }catch(e){ showErr('Portal update', e);} 
     });
     planList.appendChild(el);
   });
@@ -616,7 +639,7 @@ function renderNutrition(){
     el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
       const i = list.findIndex(x=>x.id===m.id);
       if(i>=0) list.splice(i,1);
-      await saveClientPatch({ nutrition: activeClient.nutrition });
+      await saveClientPatch({ nutrition: activeClient.nutrition }); }catch(e){ showErr('Portal update', e);} 
     });
     nutritionList.appendChild(el);
   });
@@ -802,7 +825,7 @@ function renderPhotos(){
     el.innerHTML = `<img src="${src}" alt="before ${idx+1}"/><button class="thumb-del">×</button>`;
     el.querySelector("button").addEventListener("click", async ()=>{
       b.splice(idx,1);
-      await saveClientPatch({ photos: activeClient.photos });
+      await saveClientPatch({ photos: activeClient.photos }); }catch(e){ showErr('Portal update', e);} 
     });
     beforeGallery.appendChild(el);
   });
@@ -812,7 +835,7 @@ function renderPhotos(){
     el.innerHTML = `<img src="${src}" alt="after ${idx+1}"/><button class="thumb-del">×</button>`;
     el.querySelector("button").addEventListener("click", async ()=>{
       a.splice(idx,1);
-      await saveClientPatch({ photos: activeClient.photos });
+      await saveClientPatch({ photos: activeClient.photos }); }catch(e){ showErr('Portal update', e);} 
     });
     afterGallery.appendChild(el);
   });
@@ -950,9 +973,12 @@ openPortalBtn?.addEventListener("click", ()=>{
 // ---------- Save helper ----------
 async function saveClientPatch(patch){
   if(!activeClientId) return;
-  await updateDoc(doc(db,"clients",activeClientId), patch);
+  try{
+    await updateDoc(doc(db,"clients",activeClientId), patch);
+  }catch(e){
+    showErr("Запис (Firestore rules?)", e);
+  }
 }
-
 // ---------- Render all admin panels ----------
 function renderAll(){
   if(!activeClient) return;
@@ -1045,7 +1071,7 @@ function renderPortal(){
       ex.completed = !ex.completed;
       ex.completedAt = ex.completed ? new Date().toLocaleString("bg-BG",{hour12:false}) : null;
       portalClient.plan[day] = w;
-      await updateDoc(portalClientRef, { plan: portalClient.plan });
+      try{ await updateDoc(portalClientRef, { plan: portalClient.plan }); }catch(e){ showErr('Portal update', e);} 
     });
     pPlanList.appendChild(el);
   });
@@ -1089,14 +1115,14 @@ pMarkDayDoneBtn?.addEventListener("click", async ()=>{
   const day = pDaySelect.value;
   portalClient.workoutStatus ||= {};
   portalClient.workoutStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
-  await updateDoc(portalClientRef, { workoutStatus: portalClient.workoutStatus });
+  try{ await updateDoc(portalClientRef, { workoutStatus: portalClient.workoutStatus });
 });
 pFoodDoneBtn?.addEventListener("click", async ()=>{
   if(!portalClient) return;
   const day = pFoodDaySelect.value;
   portalClient.foodStatus ||= {};
   portalClient.foodStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
-  await updateDoc(portalClientRef, { foodStatus: portalClient.foodStatus });
+  try{ await updateDoc(portalClientRef, { foodStatus: portalClient.foodStatus });
 });
 
 // portal chat (simple: store in same subcollection)
@@ -1163,7 +1189,7 @@ pAddBeforeBtn?.addEventListener("click", async ()=>{
     portalClient.photos ||= { before:[], after:[] };
     portalClient.photos.before ||= [];
     portalClient.photos.before.push(...urls);
-    await updateDoc(portalClientRef, { photos: portalClient.photos });
+    try{ await updateDoc(portalClientRef, { photos: portalClient.photos });
     pBeforeFile.value="";
     openModal("Готово", `Качени снимки: ${urls.length}`);
   }catch(e){
@@ -1179,7 +1205,7 @@ pAddAfterBtn?.addEventListener("click", async ()=>{
     portalClient.photos ||= { before:[], after:[] };
     portalClient.photos.after ||= [];
     portalClient.photos.after.push(...urls);
-    await updateDoc(portalClientRef, { photos: portalClient.photos });
+    try{ await updateDoc(portalClientRef, { photos: portalClient.photos });
     pAfterFile.value="";
     openModal("Готово", `Качени снимки: ${urls.length}`);
   }catch(e){
