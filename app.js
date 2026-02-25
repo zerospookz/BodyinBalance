@@ -600,10 +600,14 @@ function refreshProgramSelect(){
 });
 }
 openExcelFormatBtn?.addEventListener("click", ()=>{
-  openModal("Формат (тренировки)", "Колони (EN): Program | Day | Exercise | Sets | Reps | Rest | Note
-Колони (BG): Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка
+  openModal("Формат (тренировки)",
+    "Колони (EN): Program | Day | Exercise | Sets | Reps | Rest | Note
+" +
+    "Колони (BG): Програма | Ден | Упражнение | Серии | Повторения | Почивка | Бележка
 
-Day може да е: Понеделник или Mon/Monday или 1..7");
+" +
+    "Day може да е: Понеделник или Mon/Monday или 1..7"
+  );
 });
 importExcelBtn?.addEventListener("click", async ()=>{
   try{
