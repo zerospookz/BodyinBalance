@@ -1,6 +1,11 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getAuth, onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut
+  initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"; import {   getAuth,
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  signOut,
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs,
@@ -20,6 +25,9 @@ import { firebaseConfig } from "./firebase-config.js";
 // ---------- Firebase init ----------
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+// Ensure login survives refresh
+await setPersistence(auth, browserLocalPersistence);
+
 const db = getFirestore(app);
 const storage = getStorage(app);
 
@@ -244,6 +252,8 @@ function loadLocal(k, fallback){
 function saveLocal(k, v){
   localStorage.setItem(k, JSON.stringify(v));
 }
+function setLocal(k,v){ localStorage.setItem(k, String(v)); }
+function getLocal(k,fallback=""){ return localStorage.getItem(k) ?? fallback; }
 
 // ---------- Auth ----------
 function showLogin(show){
@@ -300,6 +310,7 @@ function showPortalUI(show){
 
 // ---------- Tabs (Admin) ----------
 function setTab(tab){
+  setLocal('adminTab', tab);
   tabs.forEach(t=>t.classList.toggle("active", t.dataset.tab===tab));
   Object.entries(panels).forEach(([k, el])=>{
     if(!el) return;
@@ -307,10 +318,11 @@ function setTab(tab){
   });
 }
 tabs.forEach(t=>t.addEventListener("click", ()=> setTab(t.dataset.tab)));
-setTab("chat");
+setTab(getLocal("adminTab","chat"));
 
 // ---------- Tabs (Portal) ----------
 function setPTab(tab){
+  setLocal('portalTab', tab);
   pTabs.forEach(t=>t.classList.toggle("active", t.dataset.ptab===tab));
   Object.entries(pPanels).forEach(([k, el])=>{
     if(!el) return;
@@ -318,7 +330,7 @@ function setPTab(tab){
   });
 }
 pTabs.forEach(t=>t.addEventListener("click", ()=> setPTab(t.dataset.ptab)));
-setPTab("pplan");
+setPTab(getLocal("portalTab","pplan"));
 
 // ---------- Clients list (Admin) ----------
 function startClientsListener(){
@@ -336,11 +348,20 @@ function startClientsListener(){
       el.addEventListener("click", ()=> selectClient(c.id));
       clientsList.appendChild(el);
     });
+
+    // restore previously selected client after refresh
+    const remembered = getLocal('activeClientId','');
+    if(remembered && !activeClientId){
+      // only restore if exists in snapshot
+      const exists = snap.docs.some(x=>x.id===remembered);
+      if(exists) selectClient(remembered);
+    }
   });
 }
 
 async function selectClient(clientId){
   activeClientId = clientId;
+  setLocal('activeClientId', clientId);
   if(activeClientUnsub) activeClientUnsub();
   if(chatUnsub) chatUnsub();
   activeClient = null;
@@ -504,6 +525,7 @@ markDayDoneAdminBtn?.addEventListener("click", async ()=>{
   activeClient.workoutStatus[day] = { done:true, doneAt: new Date().toLocaleString("bg-BG",{hour12:false}) };
   await saveClientPatch({ workoutStatus: activeClient.workoutStatus });
 });
+daySelect?.addEventListener("change", (e)=>{ setLocal("daySelect", e.target.value); }); // persist
 daySelect?.addEventListener("change", renderPlan);
 
 // ---------- Workouts Excel import (program presets) ----------
@@ -682,6 +704,7 @@ copyNutritionBtn?.addEventListener("click", async ()=>{
   activeClient.nutrition[toDay] = JSON.parse(JSON.stringify(activeClient.nutrition[from] || []));
   await saveClientPatch({ nutrition: activeClient.nutrition });
 });
+nDaySelect?.addEventListener("change", (e)=>{ setLocal("nDaySelect", e.target.value); }); // persist
 nDaySelect?.addEventListener("change", renderNutrition);
 
 // Nutrition Excel presets
@@ -1039,7 +1062,7 @@ async function portalLoginWithCode(code){
   });
   portalLogin.classList.add("hidden");
   portalMain.classList.remove("hidden");
-  setPTab("pplan");
+  setPTab(getLocal("portalTab","pplan"));
 }
 
 function renderPortal(){
@@ -1107,7 +1130,9 @@ function renderPortal(){
   renderPortalPhotos();
 }
 
+pDaySelect?.addEventListener("change", (e)=>{ setLocal("pDaySelect", e.target.value); }); // persist
 pDaySelect?.addEventListener("change", renderPortal);
+pFoodDaySelect?.addEventListener("change", (e)=>{ setLocal("pFoodDaySelect", e.target.value); }); // persist
 pFoodDaySelect?.addEventListener("change", renderPortal);
 
 pMarkDayDoneBtn?.addEventListener("click", async ()=>{
@@ -1226,8 +1251,16 @@ function safeInitSelectDefaults(){
   const days = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
   const map = {1:"Понеделник",2:"Вторник",3:"Сряда",4:"Четвъртък",5:"Петък",6:"Събота",0:"Неделя"};
   const today = map[new Date().getDay()] || "Понеделник";
+  const saved = {
+    daySelect: getLocal('daySelect',''),
+    nDaySelect: getLocal('nDaySelect',''),
+    pDaySelect: getLocal('pDaySelect',''),
+    pFoodDaySelect: getLocal('pFoodDaySelect',''),
+  };
   [daySelect, nDaySelect, pDaySelect, pFoodDaySelect].forEach(sel=>{
     if(!sel) return;
+    const k = sel.id;
+    if(saved[k] && days.includes(saved[k])) { sel.value = saved[k]; return; }
     if(days.includes(today)) sel.value = today;
   });
 }
