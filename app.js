@@ -779,6 +779,12 @@ function refreshNProgramSelect(){
     nProgramSelect.appendChild(o);
   });
 }
+
+// Backward-compatible alias (older code calls this name)
+function refreshNutritionProgramSelect(){
+  return refreshNProgramSelect();
+}
+
 nOpenExcelFormatBtn?.addEventListener("click", ()=>{
   openModal("Формат (хранене)",
 `Колони (EN): Program | Day | MealTitle | Desc | Kcal | P | C | F | Time | Tag | AdminNote
