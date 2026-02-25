@@ -450,12 +450,12 @@ function renderPlan(){
     el.querySelector('[data-act="edit"]').addEventListener("click", async ()=>{
       const name = prompt("Упражнение", ex.name||"") ?? ex.name;
       ex.name = (name||"").trim() || ex.name;
-      await saveClientPatch({ plan: activeClient.plan }); }catch(e){ showErr('Portal update', e);} 
+await saveClientPatch({ plan: activeClient.plan });
     });
     el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
       const i = list.findIndex(x=>x.id===ex.id);
       if(i>=0) list.splice(i,1);
-      await saveClientPatch({ plan: activeClient.plan }); }catch(e){ showErr('Portal update', e);} 
+await saveClientPatch({ plan: activeClient.plan });
     });
     planList.appendChild(el);
   });
@@ -639,7 +639,7 @@ function renderNutrition(){
     el.querySelector('[data-act="del"]').addEventListener("click", async ()=>{
       const i = list.findIndex(x=>x.id===m.id);
       if(i>=0) list.splice(i,1);
-      await saveClientPatch({ nutrition: activeClient.nutrition }); }catch(e){ showErr('Portal update', e);} 
+await saveClientPatch({ nutrition: activeClient.nutrition });
     });
     nutritionList.appendChild(el);
   });
@@ -825,7 +825,7 @@ function renderPhotos(){
     el.innerHTML = `<img src="${src}" alt="before ${idx+1}"/><button class="thumb-del">×</button>`;
     el.querySelector("button").addEventListener("click", async ()=>{
       b.splice(idx,1);
-      await saveClientPatch({ photos: activeClient.photos }); }catch(e){ showErr('Portal update', e);} 
+await saveClientPatch({ photos: activeClient.photos });
     });
     beforeGallery.appendChild(el);
   });
@@ -835,7 +835,7 @@ function renderPhotos(){
     el.innerHTML = `<img src="${src}" alt="after ${idx+1}"/><button class="thumb-del">×</button>`;
     el.querySelector("button").addEventListener("click", async ()=>{
       a.splice(idx,1);
-      await saveClientPatch({ photos: activeClient.photos }); }catch(e){ showErr('Portal update', e);} 
+await saveClientPatch({ photos: activeClient.photos });
     });
     afterGallery.appendChild(el);
   });
