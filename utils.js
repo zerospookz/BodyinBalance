@@ -30,7 +30,7 @@ export function normalizeDay(day){
   for(const k of Object.keys(map)){
     if(d.startsWith(k+" ")||d.startsWith(k+"-")||d.startsWith(k+"–")||d.startsWith(k+"—")) return map[k];
   }
-  const num = d.match(/\bday\s*([1-7])\b/i) || d.match(/\bден\s*([1-7])\b/i) || d.match(/^\s*([1-7])\b/);
+  const num = d.match(/\bday\s*([1-7])\b/i) || d.match(/\bday\s*([1-7])/i) || d.match(/\bден\s*([1-7])\b/i) || d.match(/\bден\s*([1-7])/i) || d.match(/^\s*([1-7])\b/);
   if(num){ const n=Number(num[1]); const days=["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"]; return days[n-1]; }
   return "Понеделник";
 }

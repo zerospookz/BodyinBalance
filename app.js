@@ -130,6 +130,15 @@ const exportBtn = $("exportBtn");
 const resetBtn = $("resetBtn");
 const openPortalBtn = $("openPortalBtn");
 
+// ---- FIX: keep portal open on refresh when user last used it ----
+window.addEventListener("DOMContentLoaded", ()=>{
+  const shouldOpen = (location.hash === "#portal") || (localStorage.getItem("openPortalOnLoad")==="1");
+  if(shouldOpen){
+    showPortalUI(true);
+    initPortalFromUrl();
+  }
+});
+
 // Chat
 const chatBox = $("chatBox");
 const msgFrom = $("msgFrom");
@@ -366,6 +375,8 @@ function showAdminUI(show){
   if(clientPortal) clientPortal.classList.toggle("hidden", true);
 }
 function showPortalUI(show){
+  try{ if(!show) localStorage.removeItem("openPortalOnLoad"); }catch{}
+
   if(clientPortal) clientPortal.classList.toggle("hidden", !show);
   if(coachApp) coachApp.style.display = show ? "none" : "";
 }
@@ -1086,8 +1097,14 @@ notifBtn?.addEventListener("click", ()=>{
   notifCount.textContent = "0";
 });
 openPortalBtn?.addEventListener("click", ()=>{
-  // show portal UI without code
+  // open portal UI and remember choice
+  try{ localStorage.setItem("openPortalOnLoad","1"); }catch{}
+  location.hash = "portal";
   showPortalUI(true);
+  // If we have an active client selected, prefill its code for smoother flow
+  if(activeClient?.code){
+    try{ localStorage.setItem("lastPortalCode", String(activeClient.code).trim().toUpperCase()); }catch{}
+  }
   initPortalFromUrl();
 });
 
@@ -1125,7 +1142,7 @@ backToCoachBtn?.addEventListener("click", ()=>{
 });
 
 function initPortalFromUrl(){
-  const pre = (getParam("code") || "").trim().toUpperCase();
+  const pre = ((getParam("code") || "") || (localStorage.getItem("lastPortalCode")||"")).trim().toUpperCase();
   if(pre){
     portalCode.value = pre;
     portalLoginWithCode(pre);
@@ -1144,6 +1161,8 @@ portalLoginBtn?.addEventListener("click", ()=>{
 portalCode?.addEventListener("keydown", (e)=>{ if(e.key==="Enter") portalLoginBtn.click(); });
 
 async function portalLoginWithCode(code){
+  try{ localStorage.setItem("lastPortalCode", String(code||"").trim().toUpperCase()); }catch{}
+
   // unsubscribe old
   if(portalClientUnsub) portalClientUnsub();
   portalClient = null;
