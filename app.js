@@ -130,15 +130,6 @@ const exportBtn = $("exportBtn");
 const resetBtn = $("resetBtn");
 const openPortalBtn = $("openPortalBtn");
 
-// ---- FIX: keep portal open on refresh when user last used it ----
-window.addEventListener("DOMContentLoaded", ()=>{
-  const shouldOpen = (location.hash === "#portal") || (localStorage.getItem("openPortalOnLoad")==="1");
-  if(shouldOpen){
-    showPortalUI(true);
-    initPortalFromUrl();
-  }
-});
-
 // Chat
 const chatBox = $("chatBox");
 const msgFrom = $("msgFrom");
@@ -375,11 +366,21 @@ function showAdminUI(show){
   if(clientPortal) clientPortal.classList.toggle("hidden", true);
 }
 function showPortalUI(show){
-  try{ if(!show) localStorage.removeItem("openPortalOnLoad"); }catch{}
-
   if(clientPortal) clientPortal.classList.toggle("hidden", !show);
   if(coachApp) coachApp.style.display = show ? "none" : "";
+  // persist portal state across refresh
+  try{
+    if(show){
+      localStorage.setItem("openPortalOnLoad","1");
+      if(location.hash !== "#portal") location.hash = "portal";
+    }else{
+      localStorage.removeItem("openPortalOnLoad");
+      // avoid being stuck on #portal when portal is closed
+      if(location.hash === "#portal") history.replaceState(null, "", location.pathname + location.search);
+    }
+  }catch(e){}
 }
+
 
 // ---------- Tabs (Admin) ----------
 function setTab(tab){
@@ -712,7 +713,7 @@ refreshNutritionProgramSelect();
   excelFile.value="";
   }catch(e){ console.error(e); openModal("Грешка", e?.message || String(e)); }
 });
-function applyWorkoutProgram(overwrite=false){
+async function applyWorkoutProgram(overwrite=false){
   if(!activeClientId) return openModal("Няма клиент","Избери клиент.");
   const prog = programSelect.value;
   if(!prog) return openModal("Програма","Избери програма.");
@@ -727,7 +728,14 @@ function applyWorkoutProgram(overwrite=false){
       activeClient.plan[day].push(...JSON.parse(JSON.stringify(arr)));
     }
   }
-  return saveClientPatch({ plan: activeClient.plan, workoutStatus: {} });
+
+  // Auto-switch day dropdown to the first day that has exercises
+  const orderedDays = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
+  const firstDay = orderedDays.find(d => (activeClient.plan?.[d] || []).length) || orderedDays[0];
+  if(daySelect && firstDay) daySelect.value = firstDay;
+
+  await saveClientPatch({ plan: activeClient.plan, workoutStatus: {} });
+  renderPlan?.();
 }
 applyProgramBtn?.addEventListener("click", ()=>applyWorkoutProgram(false));
 applyProgramOverwriteBtn?.addEventListener("click", ()=>applyWorkoutProgram(true));
@@ -1097,16 +1105,13 @@ notifBtn?.addEventListener("click", ()=>{
   notifCount.textContent = "0";
 });
 openPortalBtn?.addEventListener("click", ()=>{
-  // open portal UI and remember choice
-  try{ localStorage.setItem("openPortalOnLoad","1"); }catch{}
-  location.hash = "portal";
+  // show portal UI
+  try { localStorage.setItem("openPortalOnLoad","1"); } catch(e){}
+  if(location.hash !== "#portal") location.hash = "portal";
   showPortalUI(true);
-  // If we have an active client selected, prefill its code for smoother flow
-  if(activeClient?.code){
-    try{ localStorage.setItem("lastPortalCode", String(activeClient.code).trim().toUpperCase()); }catch{}
-  }
   initPortalFromUrl();
 });
+
 
 // ---------- Save helper ----------
 async function saveClientPatch(patch){
@@ -1142,7 +1147,7 @@ backToCoachBtn?.addEventListener("click", ()=>{
 });
 
 function initPortalFromUrl(){
-  const pre = ((getParam("code") || "") || (localStorage.getItem("lastPortalCode")||"")).trim().toUpperCase();
+  const pre = (getParam("code") || "").trim().toUpperCase();
   if(pre){
     portalCode.value = pre;
     portalLoginWithCode(pre);
@@ -1161,8 +1166,6 @@ portalLoginBtn?.addEventListener("click", ()=>{
 portalCode?.addEventListener("keydown", (e)=>{ if(e.key==="Enter") portalLoginBtn.click(); });
 
 async function portalLoginWithCode(code){
-  try{ localStorage.setItem("lastPortalCode", String(code||"").trim().toUpperCase()); }catch{}
-
   // unsubscribe old
   if(portalClientUnsub) portalClientUnsub();
   portalClient = null;
@@ -1183,6 +1186,7 @@ async function portalLoginWithCode(code){
     portalClientName.textContent = portalClient?.name || "Клиент";
     renderPortal();
   });
+  try{ localStorage.setItem('lastPortalCode', code); }catch(e){}
   portalLogin.classList.add("hidden");
   portalMain.classList.remove("hidden");
   setPTab(getLocal("portalTab","pplan"));
@@ -1190,8 +1194,19 @@ async function portalLoginWithCode(code){
 
 function renderPortal(){
   if(!portalClient) return;
-  const day = pDaySelect.value;
-  const w = portalClient.plan?.[day] || [];
+
+  // If selected day is empty but there is a plan in other days, auto-select first non-empty day
+  const orderedDays = ["Понеделник","Вторник","Сряда","Четвъртък","Петък","Събота","Неделя"];
+  let day = pDaySelect.value;
+  let w = portalClient.plan?.[day] || [];
+  if(!w.length && portalClient.plan){
+    const first = orderedDays.find(d => (portalClient.plan?.[d] || []).length);
+    if(first && first !== day){
+      pDaySelect.value = first;
+      day = first;
+      w = portalClient.plan?.[day] || [];
+    }
+  }
   const n = portalClient.nutrition?.[day] || [];
 
   // plan list
@@ -1403,4 +1418,41 @@ document.addEventListener("DOMContentLoaded", () => {
   if (typeof attachUIListeners === "function") {
     attachUIListeners();
   }
+
+  // Restore client portal on refresh if user was in portal
+  const wantsPortal = (location.hash === "#portal");
+  let persisted = false;
+  try{ persisted = localStorage.getItem("openPortalOnLoad")==="1"; }catch(e){}
+  if(wantsPortal || persisted){
+    showPortalUI(true);
+    // if no ?code= in URL, try last used code
+    const hasCode = (getParam("code") || "").trim();
+    if(!hasCode){
+      try{
+        const last = (localStorage.getItem("lastPortalCode")||"").trim();
+        if(last){
+          portalCode.value = last.toUpperCase();
+          portalLoginWithCode(last.toUpperCase());
+        }else{
+          initPortalFromUrl();
+        }
+      }catch(e){
+        initPortalFromUrl();
+      }
+    }else{
+      initPortalFromUrl();
+    }
+  }
 });
+
+// hash navigation for portal
+window.addEventListener("hashchange", ()=>{
+  if(location.hash === "#portal"){
+    showPortalUI(true);
+    initPortalFromUrl();
+  }else{
+    // keep admin visible
+    showPortalUI(false);
+  }
+});
+

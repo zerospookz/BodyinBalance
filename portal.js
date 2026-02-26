@@ -21,15 +21,7 @@ let clientData = null;
 function showErr(msg){ err.style.display="block"; err.textContent=msg; }
 function getParam(k){ return new URLSearchParams(location.search).get(k); }
 
-function getStoredCode(){
-  return (localStorage.getItem("lastPortalCode") || "").trim().toUpperCase();
-}
-function setStoredCode(code){
-  if(code) localStorage.setItem("lastPortalCode", String(code).trim().toUpperCase());
-}
-
 async function loginWithCode(code){
-  setStoredCode(code);
   err.style.display="none";
   const q = query(collection(db,"clients"), where("code","==",code));
   const snap = await getDocs(q);
@@ -124,7 +116,7 @@ loginBtn.onclick = ()=>{
 };
 codeEl.addEventListener("keydown", e=>{ if(e.key==="Enter") loginBtn.click(); });
 
-const pre = ((getParam("code")||"") || getStoredCode()).trim().toUpperCase();
+const pre = (getParam("code")||"").trim().toUpperCase();
 if(pre){
   codeEl.value = pre;
   loginWithCode(pre);
