@@ -31,6 +31,11 @@ import { firebaseConfig } from "./firebase-config.js";
  * - Client Portal (no auth) enters with code (portal.html redirects to index.html?portal=1&code=...)
  */
 
+
+// ---------- Global state (declared early to avoid TDZ / top-level await issues) ----------
+var workoutPrograms = {};
+var nutritionPrograms = {};
+
 // ---------- Firebase init ----------
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -38,17 +43,13 @@ const auth = getAuth(app);
 let db = getFirestore(app);
 let storage = getStorage(app);
 // Ensure login survives refresh (don’t crash app if browser blocks persistence)
-try {
-  await setPersistence(auth, browserLocalPersistence);
-} catch (e) {
+setPersistence(auth, browserLocalPersistence).catch((e)=>{
   console.warn("Auth persistence unavailable:", e);
-}
+});
 // Load shared program dictionaries (workouts/nutrition) from Firestore if available
-try {
-  await loadProgramsFromFirestore();
-} catch (e) {
+loadProgramsFromFirestore().catch((e)=>{
   console.warn("loadProgramsFromFirestore failed:", e);
-}
+});
 
 
 // ---------- Small helpers ----------
@@ -282,9 +283,8 @@ let portalClientUnsub = null;
 let portalClient = null;
 let portalUnsub = null;
 
-let workoutPrograms = loadLocal("workoutPrograms", {});
-let nutritionPrograms = loadLocal("nutritionPrograms", {});
-
+workoutPrograms = loadLocal("workoutPrograms", {});
+nutritionPrograms = loadLocal("nutritionPrograms", {});
 // ---------- Local storage helpers (presets only) ----------
 function loadLocal(k, fallback){
   try{ return JSON.parse(localStorage.getItem(k) || "null") ?? fallback; }catch{ return fallback; }
