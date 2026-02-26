@@ -1,3 +1,14 @@
+
+// ---- FIX: Restore active client on refresh ----
+document.addEventListener("DOMContentLoaded", function () {
+    const clientId = localStorage.getItem("activeClient");
+    if (!clientId) {
+        window.location.href = "admin.html";
+        return;
+    }
+    window.activeClient = clientId;
+});
+
 import { collection, query, where, getDocs, doc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { db } from "./firebase.js";
 import { escapeHtml, linkify } from "./utils.js";

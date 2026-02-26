@@ -284,3 +284,10 @@ function renderPreview(){
     previewList.appendChild(el);
   });
 }
+
+
+// ---- FIX: Persist active client ----
+function openClientPortal(clientId) {
+    localStorage.setItem("activeClient", clientId);
+    window.location.href = "portal.html";
+}
